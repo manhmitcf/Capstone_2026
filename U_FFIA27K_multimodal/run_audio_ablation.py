@@ -403,12 +403,21 @@ def run_audio_ablation_suite(
             upload_summary_file_to_hf(str(csv_path), branch_name=hf_branch)
             upload_summary_file_to_hf(str(md_path), branch_name=hf_branch)
 
+        # Explicit garbage collection to release GPU VRAM and CPU memory between runs
+        del trainer, model
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        import gc
+        gc.collect()
+
     # 3. Print Final Summary Table
     logger.info("")
     logger.info("================================================================================")
     logger.info("ALL 8 UNIMODAL ACOUSTIC ABLATION RUNS COMPLETED SUCCESSFULLY!")
     logger.info("================================================================================")
-    print("\n" + (base_ckpt_dir / "audio_ablation_summary.md").read_text(encoding="utf-8"))
+    summary_md_file = base_ckpt_dir / "audio_ablation_summary.md"
+    if summary_md_file.exists():
+        print("\n" + summary_md_file.read_text(encoding="utf-8"))
 
     # Upload final consolidated summary files if dry_run == False
     if hf_upload and not dry_run:
