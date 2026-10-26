@@ -37,34 +37,34 @@ find /marimo/Fish_Feeding_Intensity_Dataset -type f -iname "*.mp4" | wc -l
 find /marimo/Fish_Feeding_Intensity_Dataset -type f -iname "*.wav" | wc -l
 
 # ==============================================================================
-# 3. TRAINING: Video Tie-Breakers Branch (final/video_tie_breakers) (200 EPOCHS)
-#    (6-ch ConvNeXt-Nano + TKEO-STFT-MLP L2 + Configurable Video Tie-Breakers B12/B23/B13: ~5.165M params)
-#    Artifact Upload Repo: manhmitcf/Results_final_video_tie_breakers
+# 3. UNIMODAL AUDIO ABLATION STUDY: 8 RUNS (Branch: ablations/audio_depth_tkeo)
+#    - 2 TKEO Modes (On/Off) x 4 MLP Depths (Depth 1, 2, 3, 4)
+#    - Learning Rate: 1e-4 (constant), 200 epochs
+#    - Pure Unimodal Audio without Video/Fusion
+#    - Automatic per-run upload to HF branch: ablations/audio_depth_tkeo
 # ==============================================================================
 if [ ! -d "/marimo/Capstone_2026_Fish_Feeding_Intensity" ]; then
-    git clone https://github.com/manhmitcf/Multimodal_Custom_Models_2026.git /marimo/Capstone_2026_Fish_Feeding_Intensity
+    git clone https://github.com/manhmitcf/Capstone_2026.git /marimo/Capstone_2026_Fish_Feeding_Intensity
 fi
 cd /marimo/Capstone_2026_Fish_Feeding_Intensity
 git fetch origin
-git checkout final/video_tie_breakers
-git pull origin final/video_tie_breakers
+git checkout ablations/audio_depth_tkeo
+git pull origin ablations/audio_depth_tkeo
 
 cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal
 pip install --upgrade pip
 pip install -r requirements.txt
 
-# --- STEP 3.1: ARCHITECTURE VERIFICATION & PRE-FLIGHT DRY-RUN (< 5 seconds) ---
-python tests/test_tournament_architecture.py
-python main.py --dry-run
+# --- STEP 3.1: FAST PRE-FLIGHT VERIFICATION OF ALL 8 RUNS (< 15 seconds) ---
+python run_audio_ablation.py --dry-run
 
-# --- STEP 3.2: LAUNCH TRAINING ON GPU (BACKGROUND) ---
-pkill -f "python main.py" || true
-
-nohup python main.py > main.log 2>&1 &
-tail -n +1 -f main.log
+# --- STEP 3.2: LAUNCH COMPLETE 8-RUN AUDIO ABLATION SUITE ON GPU ---
+pkill -f "python run_audio_ablation.py" || true
+nohup python run_audio_ablation.py > audio_ablation.log 2>&1 &
+tail -n +1 -f audio_ablation.log
 
 # ==============================================================================
-# 4. MONITOR TRAINING PROGRESS
+# 4. MONITOR AUDIO ABLATION PROGRESS
 # ==============================================================================
-# cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal && tail -n +1 -f main.log
+# tail -n +1 -f /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal/audio_ablation.log
 # nvidia-smi

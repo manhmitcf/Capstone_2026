@@ -207,7 +207,7 @@ class TrainingConfig(BaseModel):
     """
     epochs: int = Field(default=200, gt=0, description="Total number of training epochs.")
     batch_size: int = Field(default=32, gt=0, description="Training batch size.")
-    learning_rate: float = Field(default=1e-3, gt=0, description="Initial learning rate.")
+    learning_rate: float = Field(default=1e-4, gt=0, description="Initial learning rate.")
     min_lr: float = Field(default=1e-5, ge=0.0, description="Minimum learning rate for CosineAnnealingLR.")
     weight_decay: float = Field(default=0.05, ge=0, description="Weight decay factor for AdamW.")
     lr_scheduler: Literal["cosine", "constant", "fixed"] = Field(

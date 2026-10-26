@@ -22,6 +22,10 @@ class ArtifactUploadConfig(BaseModel):
         default="/marimo/Results_final_video_tie_breakers.zip",
         description="Path of the zip file to create."
     )
+    branch: str = Field(
+        default="ablations/audio_depth_tkeo",
+        description="Target Hugging Face branch/revision matching the git branch name."
+    )
     repo_id: str = Field(
         default="manhmitcf/Results_final_video_tie_breakers",
         description="Hugging Face repository ID, for example 'username/repo-name'."
