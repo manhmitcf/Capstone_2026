@@ -4,7 +4,9 @@
     "cache_mode": "ram",
     "dataloader_workers": 8,
     "prefetch_factor": 2,
-    "ckpt_dir": "checkpoint"
+    "ckpt_dir": "checkpoint",
+    "load_video": false,
+    "load_audio": true
   },
   "training": {
     "epochs": 200,

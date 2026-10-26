@@ -196,6 +196,8 @@ class SystemConfig(BaseModel):
     """
     seed: int = Field(default=42, ge=0, description="Master random seed.")
     cache_mode: str = Field(default="ram", description="Caching mode: 'ram', 'disk', or 'none'.")
+    load_video: bool = Field(default=True, description="Whether to load and decode video modality into RAM/batches.")
+    load_audio: bool = Field(default=True, description="Whether to load and decode audio modality into RAM/batches.")
     dataloader_workers: int = Field(default=8, description="Number of worker processes for DataLoader (Fixed to 8).")
     prefetch_factor: Optional[int] = Field(default=2, description="Number of batches loaded in advance.")
     ckpt_dir: str = Field(default="checkpoint", description="Directory path to save checkpoints.")
@@ -264,7 +266,7 @@ class TrainConfig(BaseModel):
         d = dict(data)
 
         # 1. System cluster
-        sys_keys = ["seed", "cache_mode", "dataloader_workers", "prefetch_factor", "ckpt_dir"]
+        sys_keys = ["seed", "cache_mode", "load_video", "load_audio", "dataloader_workers", "prefetch_factor", "ckpt_dir"]
         sys_dict = dict(d.get("system", {})) if isinstance(d.get("system"), dict) else {}
         for k in sys_keys:
             if k in d:
@@ -317,6 +319,16 @@ class TrainConfig(BaseModel):
     def cache_mode(self) -> str: return self.system.cache_mode
     @cache_mode.setter
     def cache_mode(self, val: str) -> None: self.system.cache_mode = val
+
+    @property
+    def load_video(self) -> bool: return getattr(self.system, "load_video", True)
+    @load_video.setter
+    def load_video(self, val: bool) -> None: self.system.load_video = val
+
+    @property
+    def load_audio(self) -> bool: return getattr(self.system, "load_audio", True)
+    @load_audio.setter
+    def load_audio(self, val: bool) -> None: self.system.load_audio = val
 
     @property
     def dataloader_workers(self) -> int: return self.system.dataloader_workers

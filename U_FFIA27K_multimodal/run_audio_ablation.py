@@ -285,7 +285,7 @@ def run_audio_ablation_suite(
             )
             sys.exit(1)
 
-        logger.info(f"Loading real dataset from '{dataset_path}'...")
+        logger.info(f"Loading real dataset from '{dataset_path}' (Audio-only RAM caching)...")
         data_loader = FishMultimodalDataLoader(
             batch_size=config.batch_size,
             dataloader_workers=config.dataloader_workers,
@@ -295,6 +295,8 @@ def run_audio_ablation_suite(
             num_frames=config.num_frames,
             sample_rate=config.sample_rate,
             splitter_config=config.dataset_splitter,
+            load_video=False,
+            load_audio=True,
         )
         train_loader = data_loader.get_data_loader(split="train")
         val_loader = data_loader.get_data_loader(split="val")
