@@ -374,6 +374,7 @@ def upload_artifact_if_enabled(upload_config: ArtifactUploadConfig, config: Trai
     output_zip_path = str(zip_parent / artifact_filename)
     artifact_zip = zip_directory(source_dir, output_zip_path)
 
+    target_branch = getattr(upload_config, "branch", None) or "final"
     if upload_config.create_repo:
         try:
             create_repo(
@@ -385,9 +386,23 @@ def upload_artifact_if_enabled(upload_config: ArtifactUploadConfig, config: Trai
         except Exception as exc:
             logger.warning(f"Could not create or verify HF repository '{upload_config.repo_id}': {exc}")
 
+        try:
+            from huggingface_hub import HfApi
+            api = HfApi(token=token)
+            api.create_branch(
+                repo_id=upload_config.repo_id,
+                branch=target_branch,
+                repo_type=upload_config.repo_type,
+                exist_ok=True
+            )
+            logger.info(f"Verified branch '{target_branch}' on HF repo '{upload_config.repo_id}'.")
+        except Exception as exc:
+            logger.debug(f"Branch verification note: {exc}")
+
     logger.info("==================================================")
     logger.info(f"Uploading artifact to Hugging Face repo: '{upload_config.repo_id}'")
     logger.info(f"Repo type:                            '{upload_config.repo_type}'")
+    logger.info(f"Branch:                               '{target_branch}'")
     logger.info("==================================================")
 
     upload_file(
@@ -396,6 +411,7 @@ def upload_artifact_if_enabled(upload_config: ArtifactUploadConfig, config: Trai
         repo_id=upload_config.repo_id,
         repo_type=upload_config.repo_type,
         token=token,
+        revision=target_branch,
     )
     logger.info("Artifact upload to Hugging Face completed successfully!")
 
