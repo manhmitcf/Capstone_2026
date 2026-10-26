@@ -500,7 +500,7 @@ class HistoryLogger:
             "\n  Confusion Matrix (Actual \\ Predicted):",
             self._format_cm(val_statistics.get('confu_matrix')),
             "  Classification Report:",
-            val_statistics.get('message', '  N/A\n'),
+            val_statistics.get('message') or '  N/A\n',
             "\n[1.2] VIDEO AUXILIARY HEAD (ConvNeXt-Nano 6-Channel Kinematics)",
             f"  - Accuracy:       {float(val_statistics.get('acc_video', 0.0)):.4f}",
             f"  - Macro F1:       {float(val_statistics.get('f1_macro_video', 0.0)):.4f}",
@@ -508,7 +508,7 @@ class HistoryLogger:
             "\n  Confusion Matrix (Actual \\ Predicted):",
             self._format_cm(val_statistics.get('confu_matrix_video')),
             "  Classification Report:",
-            val_statistics.get('message_video', '  N/A\n'),
+            val_statistics.get('message_video') or '  N/A\n',
             "\n[1.3] AUDIO AUXILIARY HEAD (TKEO-STFT-MLP 256 kHz)",
             f"  - Accuracy:       {float(val_statistics.get('acc_audio', 0.0)):.4f}",
             f"  - Macro F1:       {float(val_statistics.get('f1_macro_audio', 0.0)):.4f}",
@@ -516,7 +516,7 @@ class HistoryLogger:
             "\n  Confusion Matrix (Actual \\ Predicted):",
             self._format_cm(val_statistics.get('confu_matrix_audio')),
             "  Classification Report:",
-            val_statistics.get('message_audio', '  N/A\n'),
+            val_statistics.get('message_audio') or '  N/A\n',
             "\n" + "-" * 80,
             "PART 2: TEST SPLIT (FINAL INDEPENDENT EVALUATION)",
             "-" * 80,
@@ -528,7 +528,7 @@ class HistoryLogger:
             "\n  Confusion Matrix (Actual \\ Predicted):",
             self._format_cm(test_statistics.get('confu_matrix')),
             "  Classification Report:",
-            test_statistics.get('message', '  N/A\n'),
+            test_statistics.get('message') or '  N/A\n',
             "\n[2.2] VIDEO AUXILIARY HEAD (ConvNeXt-Nano 6-Channel Kinematics)",
             f"  - Accuracy:       {float(test_statistics.get('acc_video', 0.0)):.4f}",
             f"  - Macro F1:       {float(test_statistics.get('f1_macro_video', 0.0)):.4f}",
@@ -536,7 +536,7 @@ class HistoryLogger:
             "\n  Confusion Matrix (Actual \\ Predicted):",
             self._format_cm(test_statistics.get('confu_matrix_video')),
             "  Classification Report:",
-            test_statistics.get('message_video', '  N/A\n'),
+            test_statistics.get('message_video') or '  N/A\n',
             "\n[2.3] AUDIO AUXILIARY HEAD (TKEO-STFT-MLP 256 kHz)",
             f"  - Accuracy:       {float(test_statistics.get('acc_audio', 0.0)):.4f}",
             f"  - Macro F1:       {float(test_statistics.get('f1_macro_audio', 0.0)):.4f}",
@@ -544,13 +544,14 @@ class HistoryLogger:
             "\n  Confusion Matrix (Actual \\ Predicted):",
             self._format_cm(test_statistics.get('confu_matrix_audio')),
             "  Classification Report:",
-            test_statistics.get('message_audio', '  N/A\n'),
+            test_statistics.get('message_audio') or '  N/A\n',
             "=" * 80 + "\n"
         ])
 
         try:
+            clean_content = [str(x) if x is not None else "  N/A" for x in content]
             with open(report_txt_path, 'w', encoding='utf-8') as f:
-                f.write("\n".join(content))
+                f.write("\n".join(clean_content))
             logger.info(f"Saved separate branch reports and consolidated report to: '{self.log_dir}'")
         except Exception as exc:
             logger.error(f"Failed to write consolidated evaluation report: {exc}")

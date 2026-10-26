@@ -124,8 +124,8 @@ class MultimodalEvaluator(BaseEvaluator):
         except Exception:
             auc = np.zeros(clipwise_output.shape[1])
 
-        target_acc = np.argmax(target, axis=1) if target.ndim > 1 else target
-        clipwise_output_acc = np.argmax(clipwise_output, axis=1)
+        target_acc = np.argmax(target, axis=1) if target.ndim > 1 else np.asarray(target, dtype=np.int64)
+        clipwise_output_acc = np.argmax(clipwise_output, axis=1).astype(np.int64)
         acc = accuracy_score(target_acc, clipwise_output_acc)
 
         num_classes = clipwise_output.shape[1]

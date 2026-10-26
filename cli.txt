@@ -37,17 +37,17 @@ find /marimo/Fish_Feeding_Intensity_Dataset -type f -iname "*.mp4" | wc -l
 find /marimo/Fish_Feeding_Intensity_Dataset -type f -iname "*.wav" | wc -l
 
 # ==============================================================================
-# 3. TRAINING: Video Tie-Breakers Branch (final/video_tie_breakers) (200 EPOCHS)
+# 3. TRAINING: Multimodal Tournament Network (Branch: final) (200 EPOCHS)
 #    (6-ch ConvNeXt-Nano + TKEO-STFT-MLP L2 + Configurable Video Tie-Breakers B12/B23/B13: ~5.165M params)
-#    Artifact Upload Repo: manhmitcf/Results_final_video_tie_breakers
+#    Artifact Upload Repo: manhmitcf/Results_final_video_tie_breakers (Branch: final)
 # ==============================================================================
 if [ ! -d "/marimo/Capstone_2026_Fish_Feeding_Intensity" ]; then
-    git clone https://github.com/manhmitcf/Multimodal_Custom_Models_2026.git /marimo/Capstone_2026_Fish_Feeding_Intensity
+    git clone https://github.com/manhmitcf/Capstone_2026.git /marimo/Capstone_2026_Fish_Feeding_Intensity
 fi
 cd /marimo/Capstone_2026_Fish_Feeding_Intensity
 git fetch origin
-git checkout final/video_tie_breakers
-git pull origin final/video_tie_breakers
+git checkout final
+git pull origin final
 
 cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal
 pip install --upgrade pip

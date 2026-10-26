@@ -19,7 +19,7 @@ class ArtifactUploadConfig(BaseModel):
         description="Directory to zip after training completes."
     )
     zip_path: str = Field(
-        default="/marimo/Results_final_video_tie_breakers.zip",
+        default="/marimo/Results_final.zip",
         description="Path of the zip file to create."
     )
     repo_id: str = Field(
@@ -31,12 +31,16 @@ class ArtifactUploadConfig(BaseModel):
         description="Hugging Face repository type: 'dataset', 'model', or 'space'."
     )
     path_in_repo: str = Field(
-        default="Results_final_video_tie_breakers.zip",
+        default="Results_final.zip",
         description="Destination file path inside the Hugging Face repository."
     )
     create_repo: bool = Field(
         default=True,
         description="Create the Hugging Face repository if it does not exist."
+    )
+    branch: str = Field(
+        default="final",
+        description="Target branch in the Hugging Face repository."
     )
 
     @classmethod
