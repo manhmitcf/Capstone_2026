@@ -21,7 +21,6 @@ from sklearn.metrics import (
     precision_recall_fscore_support,
 )
 
-from utils.evaluate import MultimodalEvaluator
 from utils.history_logger import HistoryLogger
 from utils.profile_model import measure_flops
 
@@ -106,9 +105,6 @@ class AudioTrainer:
             lr=self.learning_rate,
             weight_decay=self.weight_decay
         )
-
-        # Evaluator
-        self.evaluator = MultimodalEvaluator(model=self.model, loss_fn=self.eval_loss_fn)
 
         # Metrics Tracker for history.csv and learning_curves.png
         self.history_logger = HistoryLogger(log_dir=str(self.ckpt_dir))
@@ -272,12 +268,14 @@ class AudioTrainer:
         try:
             target_onehot = np.eye(num_classes)[target_acc]
             ap = metrics.average_precision_score(target_onehot, clipwise_output, average=None)
+            ap = np.nan_to_num(ap, nan=0.0)
         except Exception:
             ap = np.zeros(num_classes)
 
         try:
             target_onehot = np.eye(num_classes)[target_acc]
             auc = metrics.roc_auc_score(target_onehot, clipwise_output, average=None)
+            auc = np.nan_to_num(auc, nan=0.0)
         except Exception:
             auc = np.zeros(num_classes)
 
@@ -443,20 +441,26 @@ class AudioTrainer:
         with open(summary_csv_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             writer.writerow([
-                "training_time", "inference_time_ms", "val_loss", "val_acc", "val_qwk",
-                "test_loss", "test_acc", "test_qwk", "total_params_m", "gflops"
+                "case_name", "use_tkeo", "depth", "hidden_dims", "trainable_params",
+                "val_loss", "val_acc", "val_qwk", "test_loss", "test_acc", "test_qwk",
+                "test_f1", "latency_ms", "gflops", "training_time"
             ])
             writer.writerow([
-                f"{training_duration:.2f}",
-                f"{latency_ms:.3f}",
+                self.case_name,
+                getattr(self.model, "use_tkeo", True),
+                len(getattr(self.model, "hidden_dims", ())) + 1,
+                str(list(getattr(self.model, "hidden_dims", ()))),
+                trainable_params,
                 f"{float(val_stats.get('loss', 0.0)):.6f}",
                 f"{val_acc:.6f}",
                 f"{float(val_stats.get('qwk', 0.0)):.6f}",
                 f"{float(test_stats.get('loss', 0.0)):.6f}",
                 f"{test_acc:.6f}",
                 f"{float(test_stats.get('qwk', 0.0)):.6f}",
-                f"{trainable_params / 1e6:.4f}",
-                f"{gflops:.4f}"
+                f"{float(test_stats.get('f1_macro', 0.0)):.6f}",
+                f"{latency_ms:.3f}",
+                f"{gflops:.4f}",
+                f"{training_duration:.2f}",
             ])
         logger.info(f"Successfully exported Summary Report to: '{summary_csv_path}'")
 
@@ -604,7 +608,7 @@ class AudioTrainer:
             val_qwk = float(val_stats.get("qwk", 0.0))
             val_f1_m = float(val_stats.get("f1_macro", 0.0))
             val_f1_w = float(val_stats.get("f1_weighted", 0.0))
-            val_map = float(np.mean(val_stats.get("average_precision", 0.0)))
+            val_map = float(np.nanmean(np.nan_to_num(val_stats.get("average_precision", 0.0), nan=0.0)))
             val_mae = float(val_stats.get("ordinal_mae", 0.0))
 
             # Check for best validation accuracy (tie breaker: val_qwk)
@@ -731,7 +735,7 @@ class AudioTrainer:
         test_qwk = float(test_stats.get("qwk", 0.0))
         test_f1_m = float(test_stats.get("f1_macro", 0.0))
         test_f1_w = float(test_stats.get("f1_weighted", 0.0))
-        test_map = float(np.mean(test_stats.get("average_precision", 0.0)))
+        test_map = float(np.nanmean(np.nan_to_num(test_stats.get("average_precision", 0.0), nan=0.0)))
         test_mae = float(test_stats.get("ordinal_mae", 0.0))
 
         summary_data = {

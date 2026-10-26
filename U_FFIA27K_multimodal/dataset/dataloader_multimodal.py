@@ -151,6 +151,8 @@ class FishMultimodalDataLoader:
         num_frames: int = 2,
         sample_rate: int = 256000,
         splitter_config: Optional[SplitterConfig] = None,
+        load_video: bool = True,
+        load_audio: bool = True,
     ) -> None:
         self.batch_size = batch_size
         self.dataloader_workers = dataloader_workers
@@ -162,7 +164,8 @@ class FishMultimodalDataLoader:
         self.image_size = image_size
         self.num_frames = num_frames
         self.sample_rate = sample_rate
-
+        self.load_video = bool(load_video)
+        self.load_audio = bool(load_audio)
 
         if self.dataloader_workers == -1:
             max_cpu = os.cpu_count()
@@ -173,8 +176,9 @@ class FishMultimodalDataLoader:
             else:
                 self.dataloader_workers = (max_cpu // 2) + 1
 
-        self.splitter_config = splitter_config if splitter_config is not None else SplitterConfig(include_video=True)
-        self.splitter_config.include_video = True
+        self.splitter_config = splitter_config if splitter_config is not None else SplitterConfig(include_video=self.load_video)
+        if not self.load_video:
+            self.splitter_config.include_video = False
 
         try:
             self.splitter = FishDataSplitter(config=self.splitter_config)

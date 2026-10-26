@@ -29,8 +29,11 @@ class AudioClassifierModel(nn.Module):
         super().__init__()
         if audio_config is None:
             audio_config = AudioFeaturesConfig(use_tkeo=use_tkeo)
+        elif hasattr(audio_config, "model_copy"):
+            audio_config = audio_config.model_copy(update={"use_tkeo": bool(use_tkeo)})
         else:
-            # Override use_tkeo if explicitly specified
+            import copy
+            audio_config = copy.copy(audio_config)
             audio_config.use_tkeo = bool(use_tkeo)
 
         self.use_tkeo = audio_config.use_tkeo
@@ -80,8 +83,10 @@ class AudioClassifierModel(nn.Module):
             if audio_input is None:
                 raise ValueError("AudioClassifierModel requires audio input tensor.")
 
-        # Guard for unbatched 1D input
-        if audio_input.ndim == 1:
+        # Guard for mono channel audio [B, 1, samples] and unbatched 1D input
+        if audio_input.ndim == 3 and audio_input.size(1) == 1:
+            audio_input = audio_input.squeeze(1)
+        elif audio_input.ndim == 1:
             audio_input = audio_input.unsqueeze(0)
 
         # Detect raw acoustic waveform vs pre-extracted STFT vector

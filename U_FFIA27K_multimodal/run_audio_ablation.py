@@ -28,6 +28,7 @@ Usage:
 import os
 import sys
 import time
+import json
 import argparse
 import logging
 from pathlib import Path
@@ -329,15 +330,51 @@ def run_audio_ablation_suite(
         logger.info("================================================================================")
 
         # Check for resume
-        if resume and (case_dir / "best_model.pth").exists() and (case_dir / "summary.csv").exists():
-            logger.info(f"[{case_name}] Checkpoint and summary found. Resuming / skipping...")
-            try:
-                prev_summary = pd.read_csv(case_dir / "summary.csv")
-                if len(prev_summary) > 0:
-                    summary_rows.append(prev_summary.iloc[0].to_dict())
+        if resume and (case_dir / "best_model.pth").exists():
+            rep_json = case_dir / "evaluation_detailed_report.json"
+            summ_csv = case_dir / "summary.csv"
+            resumed = False
+            if rep_json.exists():
+                try:
+                    with open(rep_json, "r", encoding="utf-8") as f:
+                        rep = json.load(f)
+                    val_m = rep.get("validation_metrics", {})
+                    test_m = rep.get("test_metrics", {})
+                    resumed_summary = {
+                        "case_name": case_name,
+                        "use_tkeo": use_tkeo,
+                        "depth": case_cfg["depth"],
+                        "hidden_dims": str(list(hidden_dims)),
+                        "trainable_params": int(rep.get("trainable_params", 0)),
+                        "val_acc": float(val_m.get("accuracy", 0.0)),
+                        "val_qwk": float(val_m.get("qwk", 0.0)),
+                        "test_acc": float(test_m.get("accuracy", 0.0)),
+                        "test_qwk": float(test_m.get("qwk", 0.0)),
+                        "test_f1": float(test_m.get("f1_macro", 0.0)),
+                        "latency_ms": float(rep.get("latency_ms", 0.0)),
+                        "gflops": float(rep.get("gflops", 0.0)),
+                        "best_epoch": effective_epochs,
+                        "total_time_seconds": float(rep.get("training_duration_s", 0.0)),
+                    }
+                    logger.info(f"[{case_name}] Found valid evaluation report. Resuming / skipping run...")
+                    summary_rows.append(resumed_summary)
+                    resumed = True
                     continue
-            except Exception as exc:
-                logger.warning(f"Could not read previous summary for {case_name}: {exc}. Rerunning.")
+                except Exception as exc:
+                    logger.warning(f"Could not parse evaluation_detailed_report.json for {case_name}: {exc}")
+            if not resumed and summ_csv.exists():
+                try:
+                    prev_summary = pd.read_csv(summ_csv)
+                    if len(prev_summary) > 0:
+                        row = prev_summary.iloc[0].to_dict()
+                        row["case_name"] = case_name
+                        row["use_tkeo"] = use_tkeo
+                        row["depth"] = case_cfg["depth"]
+                        row["hidden_dims"] = str(list(hidden_dims))
+                        summary_rows.append(row)
+                        continue
+                except Exception as exc:
+                    logger.warning(f"Could not read previous summary for {case_name}: {exc}. Rerunning.")
 
         # Re-seed to guarantee exact reproducibility for each case
         seed_everything(active_seed + idx)
