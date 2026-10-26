@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual Environments
+.venv/
+venv/
+env/
+
+# IDEs & OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Data & Models
+raw_dataset/
+U-FFIA/
+papers/
+checkpoint/
+video_checkpoint/
+audio_checkpoint/
+teachers/
+*.pt
+*.pth
+*.log
+run_marimo.txt
+run_*.txt
+cli_*.txt
+*.secret
+*.zip
+extracted_results*/
+hf_results/
+token.txt
+*.token
+local_cli/
+docs/
+
+# Tests & Cache
+test/
+tests/
+.pytest_cache/
+
+# Agent Specifications
+AGENTS.md

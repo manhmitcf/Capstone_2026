@@ -1,0 +1,70 @@
+# ==============================================================================
+# 1. CONFIGURE TOKEN AND DOWNLOAD DATASET ON SERVER (MARIMO / GPU SERVER)
+# ==============================================================================
+# Read token from token.txt (automatically stripping BOM and trailing whitespaces)
+if [ -f "token.txt" ]; then
+    export HF_TOKEN=$(grep -o 'hf_[a-zA-Z0-9_]\+' token.txt | head -n 1)
+elif [ -f "../token.txt" ]; then
+    export HF_TOKEN=$(grep -o 'hf_[a-zA-Z0-9_]\+' ../token.txt | head -n 1)
+elif [ -f "/marimo/token.txt" ]; then
+    export HF_TOKEN=$(grep -o 'hf_[a-zA-Z0-9_]\+' /marimo/token.txt | head -n 1)
+elif [ -f "/marimo/Capstone_2026_Fish_Feeding_Intensity/token.txt" ]; then
+    export HF_TOKEN=$(grep -o 'hf_[a-zA-Z0-9_]\+' /marimo/Capstone_2026_Fish_Feeding_Intensity/token.txt | head -n 1)
+fi
+
+if [ -z "$HF_TOKEN" ]; then
+    echo "⚠️ HF_TOKEN not found! Please create token.txt (echo 'hf_xxx' > /marimo/token.txt) or run: export HF_TOKEN='hf_xxx'"
+fi
+
+git config --global credential.helper store
+if [ -n "$HF_TOKEN" ]; then
+    hf auth login --token "$HF_TOKEN" --add-to-git-credential || huggingface-cli login --token "$HF_TOKEN" || true
+fi
+sudo apt update && sudo apt install git-lfs -y
+git lfs install
+git config --global lfs.concurrenttransfers 64
+cd /marimo && nohup git clone https://huggingface.co/datasets/manhmitcf/Fish_Feeding_Intensity_Dataset > /marimo/clone.log 2>&1 &
+tail -n +1 -f /marimo/clone.log
+
+# ==============================================================================
+# 2. REORGANIZE DATASET DIRECTORY STRUCTURE
+# ==============================================================================
+mv /marimo/Fish_Feeding_Intensity_Dataset/audio/audio/* /marimo/Fish_Feeding_Intensity_Dataset/audio/
+mv /marimo/Fish_Feeding_Intensity_Dataset/video/video/* /marimo/Fish_Feeding_Intensity_Dataset/video/
+rm -rf /marimo/Fish_Feeding_Intensity_Dataset/audio/audio
+rm -rf /marimo/Fish_Feeding_Intensity_Dataset/video/video
+find /marimo/Fish_Feeding_Intensity_Dataset -type f -iname "*.mp4" | wc -l
+find /marimo/Fish_Feeding_Intensity_Dataset -type f -iname "*.wav" | wc -l
+
+# ==============================================================================
+# 3. TRAINING: Video Tie-Breakers Branch (final/video_tie_breakers) (200 EPOCHS)
+#    (6-ch ConvNeXt-Nano + TKEO-STFT-MLP L2 + Configurable Video Tie-Breakers B12/B23/B13: ~5.165M params)
+#    Artifact Upload Repo: manhmitcf/Results_final_video_tie_breakers
+# ==============================================================================
+if [ ! -d "/marimo/Capstone_2026_Fish_Feeding_Intensity" ]; then
+    git clone https://github.com/manhmitcf/Multimodal_Custom_Models_2026.git /marimo/Capstone_2026_Fish_Feeding_Intensity
+fi
+cd /marimo/Capstone_2026_Fish_Feeding_Intensity
+git fetch origin
+git checkout final/video_tie_breakers
+git pull origin final/video_tie_breakers
+
+cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal
+pip install --upgrade pip
+pip install -r requirements.txt
+
+# --- STEP 3.1: ARCHITECTURE VERIFICATION & PRE-FLIGHT DRY-RUN (< 5 seconds) ---
+python tests/test_tournament_architecture.py
+python main.py --dry-run
+
+# --- STEP 3.2: LAUNCH TRAINING ON GPU (BACKGROUND) ---
+pkill -f "python main.py" || true
+
+nohup python main.py > main.log 2>&1 &
+tail -n +1 -f main.log
+
+# ==============================================================================
+# 4. MONITOR TRAINING PROGRESS
+# ==============================================================================
+# cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal && tail -n +1 -f main.log
+# nvidia-smi
