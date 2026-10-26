@@ -290,6 +290,7 @@ def run_audio_ablation_suite(
         data_loader = FishMultimodalDataLoader(
             batch_size=config.batch_size,
             dataloader_workers=config.dataloader_workers,
+            persistent_workers=getattr(config, "persistent_workers", True),
             prefetch_factor=getattr(config, "prefetch_factor", 2),
             cache_mode=config.cache_mode,
             image_size=config.image_size,

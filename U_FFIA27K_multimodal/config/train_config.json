@@ -3,6 +3,7 @@
     "seed": 42,
     "cache_mode": "ram",
     "dataloader_workers": 8,
+    "persistent_workers": true,
     "prefetch_factor": 2,
     "ckpt_dir": "checkpoint",
     "load_video": false,

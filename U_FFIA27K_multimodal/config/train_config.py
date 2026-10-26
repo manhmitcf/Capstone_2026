@@ -199,6 +199,7 @@ class SystemConfig(BaseModel):
     load_video: bool = Field(default=True, description="Whether to load and decode video modality into RAM/batches.")
     load_audio: bool = Field(default=True, description="Whether to load and decode audio modality into RAM/batches.")
     dataloader_workers: int = Field(default=8, description="Number of worker processes for DataLoader (Fixed to 8).")
+    persistent_workers: bool = Field(default=True, description="Whether to maintain worker processes alive across epochs.")
     prefetch_factor: Optional[int] = Field(default=2, description="Number of batches loaded in advance.")
     ckpt_dir: str = Field(default="checkpoint", description="Directory path to save checkpoints.")
 
@@ -266,7 +267,7 @@ class TrainConfig(BaseModel):
         d = dict(data)
 
         # 1. System cluster
-        sys_keys = ["seed", "cache_mode", "load_video", "load_audio", "dataloader_workers", "prefetch_factor", "ckpt_dir"]
+        sys_keys = ["seed", "cache_mode", "load_video", "load_audio", "dataloader_workers", "persistent_workers", "prefetch_factor", "ckpt_dir"]
         sys_dict = dict(d.get("system", {})) if isinstance(d.get("system"), dict) else {}
         for k in sys_keys:
             if k in d:
@@ -334,6 +335,11 @@ class TrainConfig(BaseModel):
     def dataloader_workers(self) -> int: return self.system.dataloader_workers
     @dataloader_workers.setter
     def dataloader_workers(self, val: int) -> None: self.system.dataloader_workers = val
+
+    @property
+    def persistent_workers(self) -> bool: return getattr(self.system, "persistent_workers", True)
+    @persistent_workers.setter
+    def persistent_workers(self, val: bool) -> None: self.system.persistent_workers = val
 
     @property
     def prefetch_factor(self) -> Optional[int]: return self.system.prefetch_factor

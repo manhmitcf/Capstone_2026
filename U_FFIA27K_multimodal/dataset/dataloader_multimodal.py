@@ -83,7 +83,7 @@ def _decode_audio_waveform_raw(audio_path: str, sample_rate: int = 256000) -> np
                 waveform = waveform.mean(dim=0, keepdim=True)
             y = waveform.squeeze(0).to(torch.float32)
             if y.numel() > target_len:
-                y = y[:target_len]
+                y = y[:target_len].clone()
             elif y.numel() < target_len:
                 y = torch.nn.functional.pad(y, (0, target_len - y.numel()))
             return y.numpy()
@@ -153,6 +153,7 @@ class FishMultimodalDataLoader:
         splitter_config: Optional[SplitterConfig] = None,
         load_video: bool = True,
         load_audio: bool = True,
+        persistent_workers: Optional[bool] = None,
     ) -> None:
         self.batch_size = batch_size
         self.dataloader_workers = dataloader_workers
@@ -166,6 +167,7 @@ class FishMultimodalDataLoader:
         self.sample_rate = sample_rate
         self.load_video = bool(load_video)
         self.load_audio = bool(load_audio)
+        self.persistent_workers = bool(persistent_workers) if persistent_workers is not None else (self.dataloader_workers > 0)
 
         if self.dataloader_workers == -1:
             max_cpu = os.cpu_count()
@@ -191,6 +193,7 @@ class FishMultimodalDataLoader:
         logger.info("Initializing FishMultimodalDataLoader:")
         logger.info(f"  - Batch Size:               {self.batch_size}")
         logger.info(f"  - DataLoader Workers:       {self.dataloader_workers}")
+        logger.info(f"  - Persistent Workers:       {self.persistent_workers}")
         logger.info(f"  - Cache Mode:               {self.cache_mode}")
         logger.info(f"  - Image Resolution:         {self.image_size}x{self.image_size}")
         logger.info(f"  - Number of Frames:         {self.num_frames}")
@@ -202,8 +205,16 @@ class FishMultimodalDataLoader:
         clip_names = [data['clip_name'] for data in batch]
         targets = [data['target'] for data in batch]
 
-        video_tensors = torch.stack([data['video_form'] for data in batch])
-        audio_tensors = torch.stack([data['audio_form'] for data in batch])
+        if batch and batch[0].get('video_form') is not None and batch[0]['video_form'].numel() > 0:
+            video_tensors = torch.stack([data['video_form'] for data in batch])
+        else:
+            video_tensors = torch.empty(0, dtype=torch.float32)
+
+        if batch and batch[0].get('audio_form') is not None and batch[0]['audio_form'].numel() > 0:
+            audio_tensors = torch.stack([data['audio_form'] for data in batch])
+        else:
+            audio_tensors = torch.empty(0, dtype=torch.float32)
+
         targets_tensor = torch.FloatTensor(np.array(targets))
 
         return {
@@ -350,12 +361,12 @@ class FishMultimodalDataLoader:
                         video_tensor = video_tensor.unsqueeze(0)
                     video_tensor = video_tensor[:self.parent.num_frames]
                 else:
-                    video_tensor = torch.zeros((self.parent.num_frames, 3, self.parent.image_size, self.parent.image_size), dtype=torch.float32)
+                    video_tensor = torch.empty(0, dtype=torch.float32)
 
                 if self.parent.load_audio and audio_raw is not None:
                     audio_tensor = torch.from_numpy(audio_raw).to(torch.float32)  # [512000] (2.0s @ 256 kHz)
                 else:
-                    audio_tensor = torch.zeros(self.parent.sample_rate * 2, dtype=torch.float32)
+                    audio_tensor = torch.empty(0, dtype=torch.float32)
 
                 return {
                     'clip_name': clip_name,
@@ -393,13 +404,13 @@ class FishMultimodalDataLoader:
                     video_tensor = video_tensor.unsqueeze(0)
                 video_tensor = video_tensor[:self.parent.num_frames]
             else:
-                video_tensor = torch.zeros((self.parent.num_frames, 3, self.parent.image_size, self.parent.image_size), dtype=torch.float32)
+                video_tensor = torch.empty(0, dtype=torch.float32)
 
             if self.parent.load_audio:
                 audio_raw = _decode_audio_waveform_raw(audio_p, self.parent.sample_rate)
                 audio_tensor = torch.from_numpy(audio_raw).to(torch.float32)
             else:
-                audio_tensor = torch.zeros(self.parent.sample_rate * 2, dtype=torch.float32)
+                audio_tensor = torch.empty(0, dtype=torch.float32)
 
             clip_name = os.path.basename(video_p or audio_p or f"sample_{idx}")
 
@@ -422,8 +433,10 @@ class FishMultimodalDataLoader:
             'pin_memory': torch.cuda.is_available(),
             'drop_last': is_train,
         }
-        if self.dataloader_workers > 0 and self.prefetch_factor is not None:
-            kwargs['prefetch_factor'] = self.prefetch_factor
+        if self.dataloader_workers > 0:
+            kwargs['persistent_workers'] = self.persistent_workers
+            if self.prefetch_factor is not None:
+                kwargs['prefetch_factor'] = self.prefetch_factor
 
         return DataLoader(dataset, **kwargs)
 
