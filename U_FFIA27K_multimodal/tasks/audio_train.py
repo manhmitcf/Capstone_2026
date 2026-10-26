@@ -13,6 +13,13 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+from sklearn import metrics
+from sklearn.metrics import (
+    accuracy_score,
+    confusion_matrix,
+    classification_report,
+    precision_recall_fscore_support,
+)
 
 from utils.evaluate import MultimodalEvaluator
 from utils.history_logger import HistoryLogger
@@ -139,7 +146,11 @@ class AudioTrainer:
         correct = 0
         total_samples = 0
 
-        pbar = tqdm(self.train_loader, desc=f"[{self.case_name}] Epoch {epoch}/{self.epochs} [Train]", leave=False)
+        pbar = tqdm(
+            self.train_loader,
+            desc=f"[{self.case_name}] Epoch {epoch:03d}/{self.epochs:03d} [Train Audio]",
+            leave=False
+        )
         for step, batch in enumerate(pbar):
             audio, target_labels = self._extract_batch_audio_and_target(batch)
 
@@ -155,12 +166,14 @@ class AudioTrainer:
             self.optimizer.step()
 
             batch_loss = loss.item()
-            total_loss += batch_loss * len(target_labels)
+            bs = target_labels.size(0)
+            total_loss += batch_loss * bs
             preds = logits.argmax(dim=-1)
             correct += (preds == target_labels).sum().item()
-            total_samples += len(target_labels)
+            total_samples += bs
 
-            pbar.set_postfix({"loss": f"{batch_loss:.4f}"})
+            cur_acc = (correct / max(1, total_samples)) * 100.0
+            pbar.set_postfix({"loss": f"{batch_loss:.4f}", "acc": f"{cur_acc:.1f}%"})
 
             if self.is_dry_run and step >= 1:
                 break
@@ -175,6 +188,133 @@ class AudioTrainer:
             "train_acc_audio": epoch_acc,
             "train_mAP": 0.0,
         }
+
+    def evaluate(self, data_loader: DataLoader, split_name: str = "Val") -> Dict[str, Any]:
+        """
+        Evaluate AudioClassifierModel purely on acoustic waveforms without video overhead.
+        Computes Accuracy, QWK, Macro/Weighted F1, mAP, ROC-AUC, Ordinal MAE, and Confusion Matrix.
+        """
+        self.model.eval()
+        total_loss = 0.0
+        total_samples = 0
+        all_logits = []
+        all_targets = []
+
+        pbar = tqdm(
+            data_loader,
+            desc=f"[{self.case_name}] Evaluating [{split_name} Audio]",
+            leave=False,
+        )
+
+        with torch.no_grad():
+            for step, batch in enumerate(pbar):
+                audio, target_labels = self._extract_batch_audio_and_target(batch)
+                outputs = self.model(audio)
+                logits = outputs["logits"]
+
+                loss = self.loss_fn(logits, target_labels)
+                bs = target_labels.size(0)
+                total_loss += loss.item() * bs
+                total_samples += bs
+
+                all_logits.append(logits.detach().float().cpu().numpy())
+                all_targets.append(target_labels.detach().cpu().numpy())
+
+                if self.is_dry_run and step >= 1:
+                    break
+
+        if not all_logits:
+            return {}
+
+        clipwise_output = np.concatenate(all_logits, axis=0)
+        target = np.concatenate(all_targets, axis=0)
+        mean_loss = total_loss / max(1, total_samples)
+
+        target_acc = target
+        clipwise_output_acc = np.argmax(clipwise_output, axis=1).astype(np.int64)
+        acc = float(accuracy_score(target_acc, clipwise_output_acc))
+
+        num_classes = clipwise_output.shape[1]
+        all_labels = list(range(num_classes))
+        cm = confusion_matrix(target_acc, clipwise_output_acc, labels=all_labels)
+
+        class_names = ['None', 'Strong', 'Medium', 'Weak'] if num_classes == 4 else None
+        if class_names is not None:
+            message = classification_report(
+                target_acc, clipwise_output_acc, labels=all_labels, target_names=class_names, digits=4, zero_division=0
+            )
+        else:
+            message = classification_report(target_acc, clipwise_output_acc, digits=4, zero_division=0)
+        message = '\n' + message
+
+        prec_weighted, rec_weighted, f1_weighted, _ = precision_recall_fscore_support(
+            target_acc, clipwise_output_acc, average='weighted', zero_division=0
+        )
+        prec_macro, rec_macro, f1_macro, _ = precision_recall_fscore_support(
+            target_acc, clipwise_output_acc, average='macro', zero_division=0
+        )
+
+        # Physical ordinal rank mapping: 0: None (rank 0), 1: Strong (rank 3), 2: Medium (rank 2), 3: Weak (rank 1)
+        if num_classes == 4:
+            rank_map = np.array([0, 3, 2, 1])
+            pred_ranks = rank_map[clipwise_output_acc]
+            target_ranks = rank_map[target_acc]
+            ordinal_mae = float(np.mean(np.abs(pred_ranks - target_ranks)))
+            try:
+                qwk_val = metrics.cohen_kappa_score(target_ranks, pred_ranks, weights='quadratic')
+                qwk = 0.0 if np.isnan(qwk_val) else float(qwk_val)
+            except Exception:
+                qwk = 0.0
+        else:
+            ordinal_mae = float(np.mean(np.abs(clipwise_output_acc - target_acc)))
+            qwk = 0.0
+
+        try:
+            target_onehot = np.eye(num_classes)[target_acc]
+            ap = metrics.average_precision_score(target_onehot, clipwise_output, average=None)
+        except Exception:
+            ap = np.zeros(num_classes)
+
+        try:
+            target_onehot = np.eye(num_classes)[target_acc]
+            auc = metrics.roc_auc_score(target_onehot, clipwise_output, average=None)
+        except Exception:
+            auc = np.zeros(num_classes)
+
+        return {
+            "loss": mean_loss,
+            "accuracy": acc,
+            "qwk": qwk,
+            "f1_macro": float(f1_macro),
+            "f1_weighted": float(f1_weighted),
+            "precision_macro": float(prec_macro),
+            "recall_macro": float(rec_macro),
+            "precision_weighted": float(prec_weighted),
+            "recall_weighted": float(rec_weighted),
+            "average_precision": ap,
+            "auc": auc,
+            "ordinal_mae": ordinal_mae,
+            "confu_matrix": cm,
+            "message": message,
+            "acc_audio": acc,
+            "f1_macro_audio": float(f1_macro),
+            "f1_weighted_audio": float(f1_weighted),
+            "acc_video": 0.0,
+        }
+
+    @staticmethod
+    def _format_cm(mat: Optional[np.ndarray]) -> str:
+        """Format 4x4 confusion matrix into aligned text table."""
+        if mat is None or not isinstance(mat, np.ndarray) or mat.size != 16:
+            return "  [No confusion matrix available]\n"
+        labels = ['None', 'Strong', 'Medium', 'Weak']
+        header = f"  {'Actual\\Pred':<14}" + "".join(f"{lbl:>10}" for lbl in labels) + "\n"
+        lines = [header]
+        for idx, lbl in enumerate(labels):
+            row = mat[idx] if idx < len(mat) else [0] * len(labels)
+            row_str = f"  {lbl:<14}" + "".join(f"{int(val):>10d}" for val in row) + "\n"
+            lines.append(row_str)
+        return "".join(lines)
 
     @staticmethod
     def _save_cm_csv(path: Path, cm: Optional[np.ndarray]) -> None:
@@ -234,24 +374,15 @@ class AudioTrainer:
         except Exception as exc:
             logger.warning(f"Could not save confusion matrix heatmap: {exc}")
 
-    @staticmethod
-    def _write_single_report(path: Path, split_name: str, stats: Dict[str, Any]) -> None:
+    @classmethod
+    def _write_single_report(cls, path: Path, split_name: str, stats: Dict[str, Any]) -> None:
         """Write single-split acoustic classification report."""
         acc = float(stats.get("accuracy", 0.0))
         qwk = float(stats.get("qwk", 0.0))
         f1_m = float(stats.get("f1_macro", 0.0))
         f1_w = float(stats.get("f1_weighted", 0.0))
         cm = stats.get("confu_matrix")
-
-        cm_str = "  N/A\n"
-        if cm is not None and isinstance(cm, np.ndarray) and cm.size == 16:
-            labels = ["None", "Strong", "Med", "Weak"]
-            header = f"  {'':<8} " + " ".join([f"{l:>8}" for l in labels])
-            rows = [header]
-            for i, l in enumerate(labels):
-                row_str = f"  {l:<8} " + " ".join([f"{int(cm[i, j]):>8d}" for j in range(4)])
-                rows.append(row_str)
-            cm_str = "\n".join(rows) + "\n"
+        cm_str = cls._format_cm(cm)
 
         lines = [
             "=" * 70,
@@ -412,7 +543,44 @@ class AudioTrainer:
 
     def train(self) -> Dict[str, Any]:
         """Run the full acoustic training pipeline across all epochs."""
-        logger.info(f"[{self.case_name}] Starting training: epochs={self.epochs}, lr={self.learning_rate:.2e}, device={self.device}")
+        total_params = sum(p.numel() for p in self.model.parameters())
+        trainable_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+        backbone_params = sum(p.numel() for p in self.model.backbone.parameters() if p.requires_grad)
+        frontend_params = sum(p.numel() for p in self.model.frontend.parameters() if p.requires_grad)
+        classifier_params = sum(p.numel() for p in self.model.classifier.parameters() if p.requires_grad)
+
+        batch_sz = getattr(self.train_loader, "batch_size", "N/A")
+        train_samples = len(self.train_loader.dataset) if hasattr(self.train_loader, "dataset") else "N/A"
+        val_samples = len(self.val_loader.dataset) if hasattr(self.val_loader, "dataset") else "N/A"
+        test_samples = len(self.test_loader.dataset) if hasattr(self.test_loader, "dataset") else "N/A"
+
+        logger.info("=" * 80)
+        logger.info(f"STARTING UNIMODAL AUDIO ABLATION EXPERIMENT: {self.case_name.upper()}")
+        logger.info("=" * 80)
+        logger.info(f"  - Case Identifier:         {self.case_name}")
+        logger.info(f"  - Model Architecture:      AudioClassifierModel (TKEO-STFT + MLP Backbone)")
+        logger.info(f"  - TKEO Pre-Emphasis:       {getattr(self.model, 'use_tkeo', True)}")
+        logger.info(f"  - Audio Sampling Rate:     256,000 Hz (2.0s = 512,000 samples)")
+        logger.info(f"  - STFT Output Bins:        2049 linear bins (n_fft=4096, hop_size=2048)")
+        logger.info(f"  - MLP Hidden Dimensions:   {list(getattr(self.model, 'hidden_dims', ()))} (Depth {len(getattr(self.model, 'hidden_dims', ())) + 1})")
+        logger.info(f"  - Output Latent Dimension: 384 -> 4 Classes (None, Strong, Medium, Weak)")
+        logger.info(f"  - Model Parameter Breakdown:")
+        logger.info(f"    * Total Trainable:       {trainable_params:,} ({trainable_params/1e6:.3f} M)")
+        logger.info(f"    * Audio Backbone:        {backbone_params:,} ({backbone_params/1e6:.3f} M)")
+        logger.info(f"    * Audio Frontend (TKEO): {frontend_params:,} ({frontend_params/1e6:.3f} M)")
+        logger.info(f"    * Classifier Head:       {classifier_params:,} ({classifier_params/1e6:.3f} M)")
+        logger.info(f"  - Optimization & Training Hyperparameters:")
+        logger.info(f"    * Optimizer:             AdamW (lr={self.learning_rate:.2e}, weight_decay={self.weight_decay})")
+        logger.info(f"    * LR Schedule:           Constant (fixed across all {self.epochs} epochs)")
+        logger.info(f"    * Loss Function:         nn.CrossEntropyLoss()")
+        logger.info(f"    * Gradient Clipping:     max_norm = 5.0")
+        logger.info(f"    * Device:                {self.device}")
+        logger.info(f"    * Epochs:                {self.epochs}")
+        logger.info(f"    * Batch Size:            {batch_sz}")
+        logger.info(f"    * Dataset Splits:        Train={train_samples}, Val={val_samples}, Test={test_samples}")
+        logger.info(f"  - Checkpoint Run Dir:      '{self.ckpt_dir}'")
+        logger.info("=" * 80)
+
         start_time = time.time()
         final_val_stats = {}
 
@@ -422,16 +590,22 @@ class AudioTrainer:
             # 1. Training Pass
             train_metrics = self.train_epoch(epoch)
 
-            # 2. Validation Pass
-            self.model.eval()
-            with torch.no_grad():
-                val_stats = self.evaluator.evaluate(self.val_loader)
-                final_val_stats = val_stats
+            # 2. Validation Pass (Pure Audio)
+            val_stats = self.evaluate(self.val_loader, split_name="Val")
+            final_val_stats = val_stats
 
             epoch_time = time.perf_counter() - t_epoch_start
+            lr_current = self.optimizer.param_groups[0]["lr"]
+
+            train_loss = train_metrics["train_loss"]
+            train_acc = train_metrics["train_accuracy"]
             val_loss = float(val_stats.get("loss", 0.0))
             val_acc = float(val_stats.get("accuracy", 0.0))
             val_qwk = float(val_stats.get("qwk", 0.0))
+            val_f1_m = float(val_stats.get("f1_macro", 0.0))
+            val_f1_w = float(val_stats.get("f1_weighted", 0.0))
+            val_map = float(np.mean(val_stats.get("average_precision", 0.0)))
+            val_mae = float(val_stats.get("ordinal_mae", 0.0))
 
             # Check for best validation accuracy (tie breaker: val_qwk)
             is_best = (val_acc > self.best_val_acc) or (val_acc == self.best_val_acc and val_qwk > self.best_val_qwk)
@@ -454,24 +628,36 @@ class AudioTrainer:
             # 3. Log epoch metrics to history.csv via canonical HistoryLogger
             self.history_logger.log_epoch(
                 epoch=epoch,
-                train_loss=train_metrics["train_loss"],
-                train_acc=train_metrics["train_accuracy"],
-                train_mAP=train_metrics["train_mAP"],
+                train_loss=train_loss,
+                train_acc=train_acc,
+                train_mAP=val_map,
                 val_loss=val_loss,
                 val_statistics=val_stats,
-                lr=self.learning_rate,
+                lr=lr_current,
                 epoch_time_seconds=epoch_time,
                 is_best=is_best,
                 train_acc_video=0.0,
-                train_acc_audio=train_metrics["train_accuracy"]
+                train_acc_audio=train_acc
             )
 
+            # Per-epoch complete acoustic log
+            best_tag = " [*BEST*]" if is_best else ""
             logger.info(
-                f"[{self.case_name}] Epoch {epoch:3d}/{self.epochs:3d} | "
-                f"Train Loss: {train_metrics['train_loss']:.4f} Acc: {train_metrics['train_accuracy']*100:.2f}% | "
-                f"Val Loss: {val_loss:.4f} Acc: {val_acc*100:.2f}% QWK: {val_qwk:.4f}" +
-                (" [BEST]" if is_best else "")
+                f"[{self.case_name}] Epoch {epoch:03d}/{self.epochs:03d} [AUDIO] | "
+                f"Train Loss = {train_loss:.4f} | Train Acc = {train_acc*100:.2f}% | "
+                f"Val Loss = {val_loss:.4f} | Val Acc = {val_acc*100:.2f}% | "
+                f"Val QWK = {val_qwk:.4f} | Val F1 = {val_f1_m:.4f} | "
+                f"Val mAP = {val_map:.4f} | Val MAE = {val_mae:.4f} | "
+                f"LR = {lr_current:.2e} | Time = {epoch_time:.1f}s{best_tag}"
             )
+
+            if is_best:
+                logger.info(
+                    f"[*] [{self.case_name}] New peak performance at Epoch {epoch:03d}! "
+                    f"(Val Acc = {val_acc*100:.2f}%, Val QWK = {val_qwk:.4f}, Macro-F1 = {val_f1_m:.4f})\n"
+                    f"    - Saved Full Model:     '{self.ckpt_dir / 'best_model.pth'}'\n"
+                    f"    - Saved Audio Backbone: '{self.ckpt_dir / 'best_audio_backbone.pth'}'"
+                )
 
             if self.is_dry_run:
                 break
@@ -483,13 +669,20 @@ class AudioTrainer:
             logger.warning(f"Could not generate learning curves plot: {exc}")
 
         # 5. Load best model for Test Evaluation
+        logger.info("=" * 80)
+        logger.info(f"[{self.case_name}] TRAINING COMPLETE - EVALUATING BEST MODEL ON TEST SPLIT")
+        logger.info("=" * 80)
+        logger.info(
+            f"Reloading best checkpoint from Epoch {self.best_epoch:03d} "
+            f"(Peak Val Acc: {self.best_val_acc*100:.2f}%, Val QWK: {self.best_val_qwk:.4f})..."
+        )
         best_ckpt = self.ckpt_dir / "best_model.pth"
         if best_ckpt.exists():
             self.model.load_state_dict(torch.load(best_ckpt, map_location=self.device, weights_only=True))
 
         self.model.eval()
         with torch.no_grad():
-            test_stats = self.evaluator.evaluate(self.test_loader)
+            test_stats = self.evaluate(self.test_loader, split_name="Test")
 
         # 6. Profile FLOPs, Latency and Parameters
         total_params = sum(p.numel() for p in self.model.parameters())
@@ -533,9 +726,13 @@ class AudioTrainer:
             training_duration=training_duration,
         )
 
+        test_loss = float(test_stats.get("loss", 0.0))
         test_acc = float(test_stats.get("accuracy", 0.0))
         test_qwk = float(test_stats.get("qwk", 0.0))
-        test_f1 = float(np.mean(test_stats.get("f1_macro", 0.0)))
+        test_f1_m = float(test_stats.get("f1_macro", 0.0))
+        test_f1_w = float(test_stats.get("f1_weighted", 0.0))
+        test_map = float(np.mean(test_stats.get("average_precision", 0.0)))
+        test_mae = float(test_stats.get("ordinal_mae", 0.0))
 
         summary_data = {
             "case_name": self.case_name,
@@ -552,14 +749,29 @@ class AudioTrainer:
             "val_qwk": self.best_val_qwk,
             "test_acc": test_acc,
             "test_qwk": test_qwk,
-            "test_f1": test_f1,
+            "test_f1": test_f1_m,
             "total_time_seconds": training_duration,
         }
 
-        logger.info(
-            f"[{self.case_name}] COMPLETED! "
-            f"Test Acc: {test_acc*100:.2f}% | Test QWK: {test_qwk:.4f} | "
-            f"Params: {trainable_params:,} | Latency: {latency_ms:.2f}ms"
-        )
+        logger.info("=" * 80)
+        logger.info(f"[{self.case_name}] FINAL TEST EVALUATION RESULTS [AUDIO ONLY]:")
+        logger.info("=" * 80)
+        logger.info(f"  - Test Loss:              {test_loss:.4f}")
+        logger.info(f"  - Test Accuracy:          {test_acc*100:.2f}%")
+        logger.info(f"  - Test QWK:               {test_qwk:.4f}")
+        logger.info(f"  - Test Macro F1:          {test_f1_m:.4f}")
+        logger.info(f"  - Test Weighted F1:       {test_f1_w:.4f}")
+        logger.info(f"  - Test mAP:               {test_map:.4f}")
+        logger.info(f"  - Test Ordinal MAE:       {test_mae:.4f}")
+        logger.info(f"  - Inference Latency:      {latency_ms:.2f} ms / sample")
+        logger.info(f"  - Computational FLOPs:    {gflops:.4f} GFLOPs")
+        logger.info(f"  - Total Parameters:       {total_params:,} ({total_params/1e6:.3f} M)")
+        logger.info(f"  - Backbone Parameters:    {backbone_params:,} ({backbone_params/1e6:.3f} M)")
+        logger.info(f"  - Best Training Epoch:    Epoch {self.best_epoch:03d}")
+        logger.info(f"  - Total Training Time:    {training_duration:.1f} s")
+        logger.info("-" * 80)
+        logger.info(f"Classification Report [Audio]:\n{test_stats.get('message', '  N/A')}")
+        logger.info(f"Confusion Matrix [Audio] (Actual \\ Predicted):\n{self._format_cm(test_stats.get('confu_matrix'))}")
+        logger.info("=" * 80)
 
         return summary_data
