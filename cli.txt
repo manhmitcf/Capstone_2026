@@ -1,7 +1,6 @@
 # ==============================================================================
 # 1. CONFIGURE TOKEN AND DOWNLOAD DATASET ON SERVER (MARIMO / GPU SERVER)
 # ==============================================================================
-# Read token from token.txt (automatically stripping BOM and trailing whitespaces)
 if [ -f "token.txt" ]; then
     export HF_TOKEN=$(grep -o 'hf_[a-zA-Z0-9_]\+' token.txt | head -n 1)
 elif [ -f "../token.txt" ]; then
@@ -37,34 +36,33 @@ find /marimo/Fish_Feeding_Intensity_Dataset -type f -iname "*.mp4" | wc -l
 find /marimo/Fish_Feeding_Intensity_Dataset -type f -iname "*.wav" | wc -l
 
 # ==============================================================================
-# 3. TRAINING: Multimodal Tournament Network (Branch: final) (200 EPOCHS)
-#    (6-ch ConvNeXt-Nano + TKEO-STFT-MLP L2 + Configurable Video Tie-Breakers B12/B23/B13: ~5.165M params)
-#    Artifact Upload Repo: manhmitcf/final (Branch: main)
+# 3. TRAINING: Flat Multimodal Fusion Ablation (Branch: ablations/flat_multimodal_fusion)
+#    (Gating vs Sum vs Concat with Flat Linear Classifier Head)
+#    Artifact Upload Repo: manhmitcf/flat_multimodal_fusion (Branch: main)
 # ==============================================================================
 if [ ! -d "/marimo/Capstone_2026_Fish_Feeding_Intensity" ]; then
     git clone https://github.com/manhmitcf/Capstone_2026.git /marimo/Capstone_2026_Fish_Feeding_Intensity
 fi
 cd /marimo/Capstone_2026_Fish_Feeding_Intensity
 git fetch origin
-git checkout final
-git pull origin final
-
+git checkout ablations/flat_multimodal_fusion
+git pull origin ablations/flat_multimodal_fusion
 cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal
 pip install --upgrade pip
 pip install -r requirements.txt
-
-# --- STEP 3.1: ARCHITECTURE VERIFICATION & PRE-FLIGHT DRY-RUN (< 5 seconds) ---
-python tests/test_tournament_architecture.py
 python main.py --dry-run
-
-# --- STEP 3.2: LAUNCH TRAINING ON GPU (BACKGROUND) ---
 pkill -f "python main.py" || true
-
 nohup python main.py > main.log 2>&1 &
 tail -n +1 -f main.log
 
 # ==============================================================================
-# 4. MONITOR TRAINING PROGRESS
+# 4. RESUME TRAINING FROM LAST CHECKPOINT (IF INTERRUPTED)
 # ==============================================================================
-# cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal && tail -n +1 -f main.log
-# nvidia-smi
+pkill -f "python main.py" || true
+nohup python main.py --resume > main.log 2>&1 &
+tail -n +1 -f main.log
+
+# ==============================================================================
+# 5. MONITOR TRAINING PROGRESS
+# ==============================================================================
+tail -n +1 -f /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal/main.log

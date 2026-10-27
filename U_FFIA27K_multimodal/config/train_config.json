@@ -10,21 +10,21 @@
   "training": {
     "epochs": 200,
     "batch_size": 32,
-    "learning_rate": 0.001,
+    "learning_rate": 0.0001,
     "weight_decay": 0.05,
-    "eta_min": 1e-06,
-    "use_onecycle": true,
-    "lr_scheduler": "onecycle"
+    "eta_min": 1e-05,
+    "use_onecycle": false,
+    "lr_scheduler": "cosine"
   },
   "evaluation": {
     "monitor": "val_acc",
     "mode": "max",
-    "early_stopping": false,
+    "early_stopping": true,
     "patience": 40,
-    "min_delta": 0.0
+    "min_delta": 0.0001
   },
   "loss": {
-    "loss_type": "pairwise_tournament",
+    "loss_type": "ce",
     "weight_act": 0.5,
     "weight_pairwise": 0.5,
     "weight_ce": 1.0,
@@ -32,6 +32,9 @@
   },
   "model": {
     "backbone": "MultimodalSOTANet",
+    "case_name": "fusion_gating",
+    "fusion_type": "gating",
+    "head_type": "flat",
     "classes_num": 4,
     "embed_dim": 384,
     "audio_hidden_dims": [
@@ -41,7 +44,7 @@
     "video_drop_path": 0.1,
     "tie_breakers": {
       "enable_b12": false,
-      "enable_b23": true,
+      "enable_b23": false,
       "enable_b13": false
     }
   },
@@ -69,6 +72,8 @@
     "test_sample_per_class": 700,
     "save_results": true,
     "include_video": true,
+    "load_video": true,
+    "load_audio": true,
     "split_strategy": "random_sample",
     "evaluation_mode": "holdout",
     "num_folds": 5,

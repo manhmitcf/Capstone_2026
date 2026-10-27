@@ -305,38 +305,61 @@ class MultimodalTournamentFusion(nn.Module):
     def __init__(
         self,
         dim: int = 384,
+        classes_num: int = 4,
         enable_b12: bool = False,
         enable_b23: bool = True,
         enable_b13: bool = False,
         tie_breakers: Optional[Any] = None,
+        fusion_type: str = "gating",
+        head_type: str = "tournament",
         **kwargs
     ) -> None:
         super().__init__()
-        # Pop unused dropout parameter if passed via kwargs
         kwargs.pop("dropout", None)
 
         self.dim = dim
-        self.enable_b12, self.enable_b23, self.enable_b13 = _parse_tie_breakers(
-            tie_breakers, enable_b12, enable_b23, enable_b13
-        )
+        self.classes_num = classes_num
+        self.fusion_type = str(fusion_type).strip().lower()
+        self.head_type = str(head_type).strip().lower()
 
-        # 1. Direct Gated Reliability Fusion
-        self.gate = nn.Sequential(
-            nn.Linear(dim * 2, 2),
-            nn.Softmax(dim=-1)
-        )
-        self.norm_fused = nn.LayerNorm(dim)
-
-        # 2. Pairwise Boundary Tournament Decision Head (Directly fed from f_fused)
-        self.tournament_head = PairwiseBoundaryTournamentHead(
-            dim=dim,
-            temperature=2.0,
-            enable_b12=self.enable_b12,
-            enable_b23=self.enable_b23,
-            enable_b13=self.enable_b13,
-            tie_breakers=tie_breakers,
-            **kwargs
-        )
+        if self.head_type == "flat":
+            if self.fusion_type == "gating":
+                self.gate = nn.Sequential(
+                    nn.Linear(dim * 2, 2),
+                    nn.Softmax(dim=-1)
+                )
+                self.norm_fused = nn.LayerNorm(dim)
+                self.classifier = nn.Linear(dim, classes_num)
+            elif self.fusion_type == "sum":
+                self.gate = None
+                self.norm_fused = nn.LayerNorm(dim)
+                self.classifier = nn.Linear(dim, classes_num)
+            elif self.fusion_type == "concat":
+                self.gate = None
+                self.norm_fused = nn.LayerNorm(dim * 2)
+                self.classifier = nn.Linear(dim * 2, classes_num)
+            else:
+                raise ValueError(f"Unknown fusion_type: '{self.fusion_type}'. Expected 'gating', 'sum', or 'concat'.")
+            self.tournament_head = None
+        else:
+            self.enable_b12, self.enable_b23, self.enable_b13 = _parse_tie_breakers(
+                tie_breakers, enable_b12, enable_b23, enable_b13
+            )
+            self.gate = nn.Sequential(
+                nn.Linear(dim * 2, 2),
+                nn.Softmax(dim=-1)
+            )
+            self.norm_fused = nn.LayerNorm(dim)
+            self.classifier = None
+            self.tournament_head = PairwiseBoundaryTournamentHead(
+                dim=dim,
+                temperature=2.0,
+                enable_b12=self.enable_b12,
+                enable_b23=self.enable_b23,
+                enable_b13=self.enable_b13,
+                tie_breakers=tie_breakers,
+                **kwargs
+            )
 
     def forward(
         self,
@@ -344,7 +367,40 @@ class MultimodalTournamentFusion(nn.Module):
         f_audio: torch.Tensor,
         **kwargs
     ) -> Dict[str, torch.Tensor]:
-        # Step 1: Direct Cross-modal adaptive reliability gating
+        if self.head_type == "flat":
+            if self.fusion_type == "gating":
+                combined = torch.cat([f_video, f_audio], dim=-1)
+                weights = self.gate(combined)
+                w_video = weights[:, 0:1]
+                w_audio = weights[:, 1:2]
+                f_fused = self.norm_fused(w_video * f_video + w_audio * f_audio)
+                logits = self.classifier(f_fused)
+                return {
+                    "logits": logits,
+                    "clipwise_output": logits,
+                    "f_fused": f_fused,
+                    "gate": w_video,
+                    "modality_weights": weights,
+                }
+            elif self.fusion_type == "sum":
+                f_fused = self.norm_fused(f_video + f_audio)
+                logits = self.classifier(f_fused)
+                return {
+                    "logits": logits,
+                    "clipwise_output": logits,
+                    "f_fused": f_fused,
+                }
+            elif self.fusion_type == "concat":
+                combined = torch.cat([f_video, f_audio], dim=-1)
+                f_fused = self.norm_fused(combined)
+                logits = self.classifier(f_fused)
+                return {
+                    "logits": logits,
+                    "clipwise_output": logits,
+                    "f_fused": f_fused,
+                }
+
+        # Step 1: Direct Cross-modal adaptive reliability gating (Tournament Mode)
         combined = torch.cat([f_video, f_audio], dim=-1)  # [B, dim * 2]
         weights = self.gate(combined)                      # [B, 2]
         w_video = weights[:, 0:1]                         # [B, 1]

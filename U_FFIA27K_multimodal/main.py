@@ -103,6 +103,8 @@ def build_model(config: TrainConfig, seed: Optional[int] = None) -> torch.nn.Mod
         audio_hidden_dims=getattr(config.model, "audio_hidden_dims", (768, 512)),
         tie_breakers=tb_cfg,
         video_drop_path=getattr(config.model, "video_drop_path", 0.1),
+        fusion_type=getattr(config, "fusion_type", getattr(config.model, "fusion_type", "gating")),
+        head_type=getattr(config, "head_type", getattr(config.model, "head_type", "tournament")),
     )
 
 
@@ -128,11 +130,20 @@ def verify_model_dry_run(model: torch.nn.Module, config: TrainConfig, device: to
     try:
         # 1. Parameter audit
         stats = count_parameters(model)
-        logger.info(f"  - Video Backbone (ConvNeXt-Nano 6-ch, composite_ln): {stats['video_backbone']:,} ({stats['video_backbone']/1e6:.3f} M)")
-        logger.info(f"  - Audio Backbone (TKEO-STFT-MLP [768, 512] -> 384) : {stats['audio_backbone']:,} ({stats['audio_backbone']/1e6:.3f} M)")
-        logger.info(f"  - Tournament Fusion (Direct Gated, 192-ch Heads)   : {stats['fusion']:,} ({stats['fusion']/1e6:.3f} M)")
-        logger.info(f"  * Total Architecture Parameters:                     {stats['core_total']:,} ({stats['core_total']/1e6:.3f} M)")
-        logger.info(f"  * Total Trainable Parameters:                        {stats['total']:,} ({stats['total_million']:.3f} M) [Limit 5M dropped]")
+        is_flat = getattr(model, "head_type", "tournament") == "flat"
+        if is_flat:
+            fusion_type_str = getattr(model, "fusion_type", getattr(model.fusion, "fusion_type", "gating")).upper()
+            logger.info(f"  - Video Backbone (ConvNeXt-Nano 6-ch, composite_ln): {stats['video_backbone']:,} ({stats['video_backbone']/1e6:.3f} M)")
+            logger.info(f"  - Audio Backbone (TKEO-STFT-MLP [768, 512] -> 384) : {stats['audio_backbone']:,} ({stats['audio_backbone']/1e6:.3f} M)")
+            logger.info(f"  - Flat Fusion Layer ({fusion_type_str} -> 4 classes)    : {stats['fusion']:,} ({stats['fusion']/1e6:.3f} M)")
+            logger.info(f"  * Total Architecture Parameters:                     {stats['core_total']:,} ({stats['core_total']/1e6:.3f} M)")
+            logger.info(f"  * Total Trainable Parameters:                        {stats['total']:,} ({stats['total_million']:.3f} M)")
+        else:
+            logger.info(f"  - Video Backbone (ConvNeXt-Nano 6-ch, composite_ln): {stats['video_backbone']:,} ({stats['video_backbone']/1e6:.3f} M)")
+            logger.info(f"  - Audio Backbone (TKEO-STFT-MLP [768, 512] -> 384) : {stats['audio_backbone']:,} ({stats['audio_backbone']/1e6:.3f} M)")
+            logger.info(f"  - Tournament Fusion (Direct Gated, 192-ch Heads)   : {stats['fusion']:,} ({stats['fusion']/1e6:.3f} M)")
+            logger.info(f"  * Total Architecture Parameters:                     {stats['core_total']:,} ({stats['core_total']/1e6:.3f} M)")
+            logger.info(f"  * Total Trainable Parameters:                        {stats['total']:,} ({stats['total_million']:.3f} M) [Limit 5M dropped]")
 
         try:
             gflops = measure_flops(model, device=device.type, num_frames=getattr(config, "num_frames", 2))
@@ -260,11 +271,14 @@ def generate_cv_summary_report(model_dir: Path, num_folds: int) -> Path:
 
 
 def build_artifact_filename(config: TrainConfig, timestamp: str, suffix: str = ".zip") -> str:
+    case_name = getattr(config, "case_name", getattr(config.model, "case_name", None))
+    safe_suffix = suffix if suffix.startswith(".") else f".{suffix}"
+    if case_name:
+        return f"{case_name}_{timestamp}{safe_suffix}"
     model_name = config.model.backbone
     dataset_name = Path(config.dataset_splitter.dataset_path).name or "dataset"
     split_strategy = config.dataset_splitter.split_strategy
     eval_mode = config.dataset_splitter.evaluation_mode
-    safe_suffix = suffix if suffix.startswith(".") else f".{suffix}"
     return f"{model_name}_{dataset_name}_{split_strategy}_{eval_mode}_{timestamp}{safe_suffix}"
 
 
@@ -426,6 +440,7 @@ def run_training_session(
     fold_index: Optional[int] = None,
     lr_scheduler: Optional[str] = None,
     eta_min: Optional[float] = None,
+    resume: bool = False,
 ) -> None:
     pkg_dir = Path(__file__).resolve().parent
     if train_config_path is None:
@@ -544,7 +559,7 @@ def run_training_session(
             device=device,
             train_config_path=train_config_path
         )
-        trainer.train()
+        trainer.train(resume=resume)
 
     # Upload artifacts to Hugging Face
     upload_config = ArtifactUploadConfig.from_json(artifact_upload_config_path)
@@ -563,6 +578,7 @@ def main() -> None:
     parser.add_argument("--fold-index", type=int, default=None, help="Specific CV fold index to run (0 to num_folds - 1)")
     parser.add_argument("--lr-scheduler", type=str, choices=["onecycle", "cosine", "constant", "fixed", "none"], default=None, help="Override learning rate scheduler")
     parser.add_argument("--eta-min", type=float, default=None, help="Override minimum LR (eta_min) for CosineAnnealingLR")
+    parser.add_argument("--resume", action="store_true", help="Resume training from last_model.pth if available")
     args = parser.parse_args()
 
     run_training_session(
@@ -575,6 +591,7 @@ def main() -> None:
         fold_index=args.fold_index,
         lr_scheduler=args.lr_scheduler,
         eta_min=args.eta_min,
+        resume=args.resume,
     )
 
 

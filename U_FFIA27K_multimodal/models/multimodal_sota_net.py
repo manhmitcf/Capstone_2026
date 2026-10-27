@@ -53,6 +53,8 @@ class MultimodalSOTANet(nn.Module):
         audio_hidden_dims: Tuple[int, ...] = (768, 512),
         tie_breakers: Optional[Any] = None,
         video_drop_path: float = 0.1,
+        fusion_type: str = "gating",
+        head_type: str = "tournament",
         **kwargs
     ) -> None:
         super().__init__()
@@ -65,6 +67,8 @@ class MultimodalSOTANet(nn.Module):
         self.audio_hidden_dims = audio_hidden_dims
         self.tie_breakers = tie_breakers
         self.video_drop_path = video_drop_path
+        self.fusion_type = str(fusion_type).strip().lower()
+        self.head_type = str(head_type).strip().lower()
 
         # 1. Frontends
         self.audio_frontend = audio_frontend if audio_frontend is not None else AudioFrontend()
@@ -85,17 +89,23 @@ class MultimodalSOTANet(nn.Module):
             dropout=0.1,
         )
 
-        # 3. Multimodal Tournament Fusion (Direct Gated, 384-dim)
+        # 3. Multimodal Fusion Engine (Supports Flat Fusion and Tournament)
         self.fusion = MultimodalTournamentFusion(
             dim=embed_dim,
+            classes_num=classes_num,
             tie_breakers=tie_breakers,
+            fusion_type=fusion_type,
+            head_type=head_type,
             **kwargs
         )
 
-        # 4. Auxiliary Unimodal Classifier Heads (3,080 params)
-        # Allows independent supervision, accuracy tracking, and multi-objective optimization
-        self.aux_head_video = nn.Linear(embed_dim, classes_num)
-        self.aux_head_audio = nn.Linear(embed_dim, classes_num)
+        # 4. Auxiliary Unimodal Classifier Heads (only when not flat head to guarantee 100% active gradients)
+        if self.head_type == "flat":
+            self.aux_head_video = None
+            self.aux_head_audio = None
+        else:
+            self.aux_head_video = nn.Linear(embed_dim, classes_num)
+            self.aux_head_audio = nn.Linear(embed_dim, classes_num)
 
     def forward(
         self,
@@ -129,6 +139,10 @@ class MultimodalSOTANet(nn.Module):
         # Step 2: Unimodal Spatiotemporal Feature Extraction
         f_video = self.video_backbone(frames_6ch)
         f_audio = self.audio_backbone(stft_feat)
+
+        # Flat Head Fast-Path
+        if self.head_type == "flat":
+            return self.fusion(f_video=f_video, f_audio=f_audio)
 
         # Auxiliary Unimodal Logits (for standalone evaluation & multi-objective training)
         logits_video = self.aux_head_video(f_video)
