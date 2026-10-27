@@ -90,8 +90,12 @@ class MultimodalTrainer:
         self.train_config_path = train_config_path
 
         # Setup Loss
+        head_type = getattr(getattr(self.config, "model", None), "head_type", "tournament")
         loss_type = getattr(self.config, "loss_type", "pairwise_tournament")
-        if loss_type == "pairwise_tournament":
+        if head_type == "flat" or loss_type not in ("pairwise_tournament",):
+            self.loss_fn = ClipCELoss()
+            logger.info("Configured standard ClipCELoss (Flat head / Cross-Entropy mode).")
+        else:
             self.loss_fn = PairwiseTournamentLoss(
                 weight_act=getattr(self.config, "weight_act", 0.5),
                 weight_pairwise=getattr(self.config, "weight_pairwise", 0.5),
@@ -99,9 +103,6 @@ class MultimodalTrainer:
                 aux_loss_weight=getattr(self.config, "aux_loss_weight", 0.3),
             ).to(self.device)
             logger.info("Configured PairwiseTournamentLoss (Activity Gate + 3 Boundaries).")
-        else:
-            self.loss_fn = ClipCELoss()
-            logger.info("Configured standard ClipCELoss.")
 
         # Training & Optimization settings
         self.weight_decay = getattr(self.config, "weight_decay", 0.05)
