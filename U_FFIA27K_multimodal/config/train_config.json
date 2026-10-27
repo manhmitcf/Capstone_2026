@@ -3,6 +3,7 @@
     "seed": 42,
     "cache_mode": "ram",
     "dataloader_workers": 8,
+    "persistent_workers": true,
     "prefetch_factor": 2,
     "ckpt_dir": "checkpoint"
   },
@@ -12,7 +13,9 @@
     "learning_rate": 0.001,
     "weight_decay": 0.05,
     "min_lr": 1e-05,
-    "lr_scheduler": "constant"
+    "eta_min": 1e-06,
+    "use_onecycle": true,
+    "lr_scheduler": "onecycle"
   },
   "evaluation": {
     "monitor": "val_acc",

@@ -424,6 +424,8 @@ def run_training_session(
     seed: Optional[int] = None,
     evaluation_mode: Optional[str] = None,
     fold_index: Optional[int] = None,
+    lr_scheduler: Optional[str] = None,
+    eta_min: Optional[float] = None,
 ) -> None:
     pkg_dir = Path(__file__).resolve().parent
     if train_config_path is None:
@@ -439,6 +441,10 @@ def run_training_session(
         config.dataset_splitter.evaluation_mode = evaluation_mode
     if fold_index is not None:
         config.dataset_splitter.fold_index = fold_index
+    if lr_scheduler is not None:
+        config.lr_scheduler = lr_scheduler
+    if eta_min is not None:
+        config.eta_min = eta_min
 
     # Lock deterministic master seed across PyTorch, CUDA, NumPy, Random
     active_seed = int(getattr(config, "seed", getattr(config.dataset_splitter, "seed", 42)))
@@ -555,6 +561,8 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=None, help="Master random seed for reproducibility (default: 42 from config)")
     parser.add_argument("--evaluation-mode", type=str, choices=["holdout", "cross_validation"], default=None, help="Override evaluation mode (holdout or cross_validation)")
     parser.add_argument("--fold-index", type=int, default=None, help="Specific CV fold index to run (0 to num_folds - 1)")
+    parser.add_argument("--lr-scheduler", type=str, choices=["onecycle", "cosine", "constant", "fixed", "none"], default=None, help="Override learning rate scheduler")
+    parser.add_argument("--eta-min", type=float, default=None, help="Override minimum LR (eta_min) for CosineAnnealingLR")
     args = parser.parse_args()
 
     run_training_session(
@@ -565,6 +573,8 @@ def main() -> None:
         seed=args.seed,
         evaluation_mode=args.evaluation_mode,
         fold_index=args.fold_index,
+        lr_scheduler=args.lr_scheduler,
+        eta_min=args.eta_min,
     )
 
 

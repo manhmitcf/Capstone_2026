@@ -197,6 +197,7 @@ class SystemConfig(BaseModel):
     seed: int = Field(default=42, ge=0, description="Master random seed.")
     cache_mode: str = Field(default="ram", description="Caching mode: 'ram', 'disk', or 'none'.")
     dataloader_workers: int = Field(default=8, description="Number of worker processes for DataLoader (Fixed to 8).")
+    persistent_workers: bool = Field(default=True, description="Whether to maintain worker processes alive across epochs.")
     prefetch_factor: Optional[int] = Field(default=2, description="Number of batches loaded in advance.")
     ckpt_dir: str = Field(default="checkpoint", description="Directory path to save checkpoints.")
 
@@ -209,10 +210,12 @@ class TrainingConfig(BaseModel):
     batch_size: int = Field(default=32, gt=0, description="Training batch size.")
     learning_rate: float = Field(default=1e-3, gt=0, description="Initial learning rate.")
     min_lr: float = Field(default=1e-5, ge=0.0, description="Minimum learning rate for CosineAnnealingLR.")
+    eta_min: float = Field(default=1e-6, ge=0.0, description="Minimum learning rate for CosineAnnealingLR.")
     weight_decay: float = Field(default=0.05, ge=0, description="Weight decay factor for AdamW.")
-    lr_scheduler: Literal["cosine", "constant", "fixed"] = Field(
-        default="constant",
-        description="Learning rate schedule: 'cosine' (CosineAnnealingLR) or 'constant' (fixed LR across all epochs)."
+    use_onecycle: Optional[bool] = Field(default=None, description="Legacy flag for OneCycleLR.")
+    lr_scheduler: str = Field(
+        default="onecycle",
+        description="Learning rate schedule: 'onecycle', 'cosine', or 'constant' (fixed LR across all epochs)."
     )
 
 
@@ -264,7 +267,7 @@ class TrainConfig(BaseModel):
         d = dict(data)
 
         # 1. System cluster
-        sys_keys = ["seed", "cache_mode", "dataloader_workers", "prefetch_factor", "ckpt_dir"]
+        sys_keys = ["seed", "cache_mode", "dataloader_workers", "persistent_workers", "prefetch_factor", "ckpt_dir"]
         sys_dict = dict(d.get("system", {})) if isinstance(d.get("system"), dict) else {}
         for k in sys_keys:
             if k in d:
@@ -273,11 +276,13 @@ class TrainConfig(BaseModel):
             d["system"] = sys_dict
 
         # 2. Training cluster
-        train_keys = ["epochs", "batch_size", "learning_rate", "min_lr", "weight_decay", "lr_scheduler"]
+        train_keys = ["epochs", "batch_size", "learning_rate", "min_lr", "eta_min", "weight_decay", "lr_scheduler", "use_onecycle"]
         train_dict = dict(d.get("training", {})) if isinstance(d.get("training"), dict) else {}
         for k in train_keys:
             if k in d:
                 train_dict[k] = d.pop(k)
+        if "use_onecycle" in train_dict and "lr_scheduler" not in train_dict:
+            train_dict["lr_scheduler"] = "onecycle" if train_dict["use_onecycle"] else "cosine"
         if train_dict:
             d["training"] = train_dict
 
@@ -324,6 +329,11 @@ class TrainConfig(BaseModel):
     def dataloader_workers(self, val: int) -> None: self.system.dataloader_workers = val
 
     @property
+    def persistent_workers(self) -> bool: return getattr(self.system, "persistent_workers", True)
+    @persistent_workers.setter
+    def persistent_workers(self, val: bool) -> None: self.system.persistent_workers = val
+
+    @property
     def prefetch_factor(self) -> Optional[int]: return self.system.prefetch_factor
     @prefetch_factor.setter
     def prefetch_factor(self, val: Optional[int]) -> None: self.system.prefetch_factor = val
@@ -354,9 +364,26 @@ class TrainConfig(BaseModel):
     def min_lr(self, val: float) -> None: self.training.min_lr = val
 
     @property
+    def eta_min(self) -> float: return getattr(self.training, "eta_min", 1e-6)
+    @eta_min.setter
+    def eta_min(self, val: float) -> None: self.training.eta_min = val
+
+    @property
     def lr_scheduler(self) -> str: return self.training.lr_scheduler
     @lr_scheduler.setter
-    def lr_scheduler(self, val: str) -> None: self.training.lr_scheduler = val
+    def lr_scheduler(self, val: str) -> None:
+        self.training.lr_scheduler = val
+        self.training.use_onecycle = (val == "onecycle")
+
+    @property
+    def use_onecycle(self) -> bool:
+        if self.training.use_onecycle is not None:
+            return bool(self.training.use_onecycle)
+        return self.training.lr_scheduler == "onecycle"
+    @use_onecycle.setter
+    def use_onecycle(self, val: bool) -> None:
+        self.training.use_onecycle = bool(val)
+        self.training.lr_scheduler = "onecycle" if val else "cosine"
 
     @property
     def weight_decay(self) -> float: return self.training.weight_decay
