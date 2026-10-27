@@ -23,7 +23,7 @@ class ArtifactUploadConfig(BaseModel):
         description="Path of the zip file to create."
     )
     repo_id: str = Field(
-        default="manhmitcf/Results_final_video_tie_breakers",
+        default="manhmitcf/final",
         description="Hugging Face repository ID, for example 'username/repo-name'."
     )
     repo_type: str = Field(
@@ -39,7 +39,7 @@ class ArtifactUploadConfig(BaseModel):
         description="Create the Hugging Face repository if it does not exist."
     )
     branch: str = Field(
-        default="final",
+        default="main",
         description="Target branch in the Hugging Face repository."
     )
 
