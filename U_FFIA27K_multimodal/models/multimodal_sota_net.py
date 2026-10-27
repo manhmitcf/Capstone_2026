@@ -53,6 +53,7 @@ class MultimodalSOTANet(nn.Module):
         audio_hidden_dims: Tuple[int, ...] = (768, 512),
         tie_breakers: Optional[Any] = None,
         video_drop_path: float = 0.1,
+        modality: str = "multimodal",
         **kwargs
     ) -> None:
         super().__init__()
@@ -65,12 +66,12 @@ class MultimodalSOTANet(nn.Module):
         self.audio_hidden_dims = audio_hidden_dims
         self.tie_breakers = tie_breakers
         self.video_drop_path = video_drop_path
+        self.modality = str(modality).strip().lower() if modality else "multimodal"
 
-        # 1. Frontends
-        self.audio_frontend = audio_frontend if audio_frontend is not None else AudioFrontend()
+        # 1. Frontends & Motion Kinematics
         self.motion_kinematics = FishMotionKinematics6Ch(image_size=image_size)
 
-        # 2. Backbones (~4.78M)
+        # 2. Video Backbone & Head
         self.video_backbone = ConvNeXtNanoVideoBackbone(
             embed_dim=embed_dim,
             in_chans=in_chans,
@@ -78,30 +79,49 @@ class MultimodalSOTANet(nn.Module):
             drop_path_rate=video_drop_path,
             temporal_mode=temporal_mode,
         )
-        self.audio_backbone = AudioMLPBackbone(
-            in_features=2049,
-            hidden_dims=audio_hidden_dims,
-            embed_dim=embed_dim,
-            dropout=0.1,
-        )
-
-        # 3. Multimodal Tournament Fusion (Direct Gated, 384-dim)
-        self.fusion = MultimodalTournamentFusion(
-            dim=embed_dim,
-            tie_breakers=tie_breakers,
-            **kwargs
-        )
-
-        # 4. Auxiliary Unimodal Classifier Heads (3,080 params)
-        # Allows independent supervision, accuracy tracking, and multi-objective optimization
         self.aux_head_video = nn.Linear(embed_dim, classes_num)
-        self.aux_head_audio = nn.Linear(embed_dim, classes_num)
+
+        # 3. Audio & Multimodal Fusion (only instantiated when not pure unimodal video)
+        if self.modality != "video":
+            self.audio_frontend = audio_frontend if audio_frontend is not None else AudioFrontend()
+            self.audio_backbone = AudioMLPBackbone(
+                in_features=2049,
+                hidden_dims=audio_hidden_dims,
+                embed_dim=embed_dim,
+                dropout=0.1,
+            )
+            self.fusion = MultimodalTournamentFusion(
+                dim=embed_dim,
+                tie_breakers=tie_breakers,
+                **kwargs
+            )
+            self.aux_head_audio = nn.Linear(embed_dim, classes_num)
+        else:
+            self.audio_frontend = None
+            self.audio_backbone = None
+            self.fusion = None
+            self.aux_head_audio = None
 
     def forward(
         self,
         video_input: torch.Tensor,
-        audio_input: torch.Tensor
+        audio_input: Optional[torch.Tensor] = None
     ) -> Dict[str, torch.Tensor]:
+        if self.modality == "video":
+            if video_input.ndim == 4:
+                video_input = video_input.unsqueeze(0)
+            if video_input.ndim == 5 and video_input.size(2) == 3:
+                frames_6ch, _ = self.motion_kinematics(video_input)
+            else:
+                frames_6ch = video_input
+
+            f_video = self.video_backbone(frames_6ch)
+            logits_video = self.aux_head_video(f_video)
+            return {
+                "logits": logits_video,
+                "clipwise_output": logits_video,
+                "logits_video": logits_video,
+            }
         """
         Hierarchical End-to-End Forward Pass:
           Raw Inputs:
