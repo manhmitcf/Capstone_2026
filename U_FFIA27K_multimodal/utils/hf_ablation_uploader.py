@@ -47,8 +47,8 @@ def discover_hf_token() -> Optional[str]:
 def upload_audio_case_to_hf(
     case_name: str,
     case_dir: str,
-    repo_id: str = "manhmitcf/Results_final_video_tie_breakers",
-    branch_name: str = "ablations/audio_depth_tkeo",
+    repo_id: str = "manhmitcf/audio_depth_tkeo",
+    branch_name: str = "main",
     repo_type: str = "dataset",
 ) -> bool:
     """
@@ -117,8 +117,8 @@ def upload_audio_case_to_hf(
 
 def upload_summary_file_to_hf(
     file_path: str,
-    repo_id: str = "manhmitcf/Results_final_video_tie_breakers",
-    branch_name: str = "ablations/audio_depth_tkeo",
+    repo_id: str = "manhmitcf/audio_depth_tkeo",
+    branch_name: str = "main",
     repo_type: str = "dataset",
 ) -> bool:
     """Upload consolidated summary table to the root of the ablation branch."""

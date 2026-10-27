@@ -41,7 +41,7 @@ find /marimo/Fish_Feeding_Intensity_Dataset -type f -iname "*.wav" | wc -l
 #    - 2 TKEO Modes (On/Off) x 4 MLP Depths (Depth 1, 2, 3, 4)
 #    - Learning Rate: 1e-4 (constant), 200 epochs
 #    - Pure Unimodal Audio without Video/Fusion
-#    - Automatic per-run upload to HF branch: ablations/audio_depth_tkeo
+#    - Automatic per-run upload to HF repo: manhmitcf/audio_depth_tkeo (branch: main)
 # ==============================================================================
 if [ ! -d "/marimo/Capstone_2026_Fish_Feeding_Intensity" ]; then
     git clone https://github.com/manhmitcf/Capstone_2026.git /marimo/Capstone_2026_Fish_Feeding_Intensity
@@ -81,7 +81,7 @@ tail -n +1 -f audio_ablation.log
 # --- CASE B: Server was wiped / reset (disk is clean, checkpoints missing locally) ---
 # Pull previously completed cases from Hugging Face back to local disk first:
 cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal
-python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='manhmitcf/Results_final_video_tie_breakers', repo_type='dataset', revision='ablations/audio_depth_tkeo', allow_patterns='audio_ablations/*', local_dir='checkpoint')"
+python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='manhmitcf/audio_depth_tkeo', repo_type='dataset', revision='main', allow_patterns='audio_ablations/*', local_dir='checkpoint')"
 pkill -f "python run_audio_ablation.py" || true
 nohup python run_audio_ablation.py --resume > audio_ablation.log 2>&1 &
 tail -n +1 -f audio_ablation.log

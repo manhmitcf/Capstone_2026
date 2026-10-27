@@ -236,7 +236,7 @@ def run_audio_ablation_suite(
     resume: bool = False,
     cases_filter: Optional[List[str]] = None,
     hf_upload: bool = True,
-    hf_branch: str = "ablations/audio_depth_tkeo",
+    hf_branch: str = "main",
     train_config_path: Optional[str] = None,
 ) -> None:
     """Execute the full 8-case unimodal acoustic ablation suite."""
@@ -476,7 +476,7 @@ def main():
     parser.add_argument("--resume", action="store_true", help="Skip already completed ablation cases")
     parser.add_argument("--cases", type=str, default=None, help="Comma-separated case names to run exclusively")
     parser.add_argument("--no-hf-upload", action="store_true", help="Disable Hugging Face automatic upload")
-    parser.add_argument("--hf-branch", type=str, default="ablations/audio_depth_tkeo", help="HF target branch name")
+    parser.add_argument("--hf-branch", type=str, default="main", help="HF target branch name")
     parser.add_argument("--config", type=str, default=None, help="Path to train_config.json")
 
     args = parser.parse_args()

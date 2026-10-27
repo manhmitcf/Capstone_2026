@@ -23,11 +23,11 @@ class ArtifactUploadConfig(BaseModel):
         description="Path of the zip file to create."
     )
     branch: str = Field(
-        default="ablations/audio_depth_tkeo",
+        default="main",
         description="Target Hugging Face branch/revision matching the git branch name."
     )
     repo_id: str = Field(
-        default="manhmitcf/Results_final_video_tie_breakers",
+        default="manhmitcf/audio_depth_tkeo",
         description="Hugging Face repository ID, for example 'username/repo-name'."
     )
     repo_type: str = Field(
