@@ -283,6 +283,8 @@ class TrainConfig(BaseModel):
         for k in train_keys:
             if k in d:
                 train_dict[k] = d.pop(k)
+        if "use_onecycle" in train_dict and "lr_scheduler" not in train_dict:
+            train_dict["lr_scheduler"] = "onecycle" if train_dict["use_onecycle"] else "cosine"
         if train_dict:
             d["training"] = train_dict
 
@@ -381,7 +383,9 @@ class TrainConfig(BaseModel):
     @property
     def lr_scheduler(self) -> str: return self.training.lr_scheduler
     @lr_scheduler.setter
-    def lr_scheduler(self, val: str) -> None: self.training.lr_scheduler = val
+    def lr_scheduler(self, val: str) -> None:
+        self.training.lr_scheduler = val
+        self.training.use_onecycle = (val == "onecycle")
 
     @property
     def use_onecycle(self) -> bool:
