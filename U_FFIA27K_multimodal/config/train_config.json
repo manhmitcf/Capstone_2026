@@ -15,6 +15,8 @@
     "learning_rate": 0.0001,
     "weight_decay": 0.05,
     "min_lr": 1e-05,
+    "eta_min": 1e-06,
+    "use_onecycle": false,
     "lr_scheduler": "constant"
   },
   "evaluation": {

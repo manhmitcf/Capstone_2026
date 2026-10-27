@@ -212,10 +212,12 @@ class TrainingConfig(BaseModel):
     batch_size: int = Field(default=32, gt=0, description="Training batch size.")
     learning_rate: float = Field(default=1e-4, gt=0, description="Initial learning rate.")
     min_lr: float = Field(default=1e-5, ge=0.0, description="Minimum learning rate for CosineAnnealingLR.")
+    eta_min: float = Field(default=1e-6, ge=0.0, description="Minimum learning rate for CosineAnnealingLR.")
     weight_decay: float = Field(default=0.05, ge=0, description="Weight decay factor for AdamW.")
-    lr_scheduler: Literal["cosine", "constant", "fixed"] = Field(
+    use_onecycle: Optional[bool] = Field(default=None, description="Legacy flag for OneCycleLR.")
+    lr_scheduler: str = Field(
         default="constant",
-        description="Learning rate schedule: 'cosine' (CosineAnnealingLR) or 'constant' (fixed LR across all epochs)."
+        description="Learning rate schedule: 'onecycle', 'cosine', or 'constant' (fixed LR across all epochs)."
     )
 
 
@@ -276,7 +278,7 @@ class TrainConfig(BaseModel):
             d["system"] = sys_dict
 
         # 2. Training cluster
-        train_keys = ["epochs", "batch_size", "learning_rate", "min_lr", "weight_decay", "lr_scheduler"]
+        train_keys = ["epochs", "batch_size", "learning_rate", "min_lr", "eta_min", "weight_decay", "lr_scheduler", "use_onecycle"]
         train_dict = dict(d.get("training", {})) if isinstance(d.get("training"), dict) else {}
         for k in train_keys:
             if k in d:
@@ -372,9 +374,24 @@ class TrainConfig(BaseModel):
     def min_lr(self, val: float) -> None: self.training.min_lr = val
 
     @property
+    def eta_min(self) -> float: return getattr(self.training, "eta_min", 1e-6)
+    @eta_min.setter
+    def eta_min(self, val: float) -> None: self.training.eta_min = val
+
+    @property
     def lr_scheduler(self) -> str: return self.training.lr_scheduler
     @lr_scheduler.setter
     def lr_scheduler(self, val: str) -> None: self.training.lr_scheduler = val
+
+    @property
+    def use_onecycle(self) -> bool:
+        if self.training.use_onecycle is not None:
+            return bool(self.training.use_onecycle)
+        return self.training.lr_scheduler == "onecycle"
+    @use_onecycle.setter
+    def use_onecycle(self, val: bool) -> None:
+        self.training.use_onecycle = bool(val)
+        self.training.lr_scheduler = "onecycle" if val else "cosine"
 
     @property
     def weight_decay(self) -> float: return self.training.weight_decay
