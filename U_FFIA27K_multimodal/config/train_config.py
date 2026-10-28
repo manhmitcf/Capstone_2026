@@ -328,29 +328,24 @@ class TrainConfig(BaseModel):
         model_dict = dict(d.get('model', {})) if isinstance(d.get('model'), dict) else {}
         video_dict = dict(d.get('video_features', {})) if isinstance(d.get('video_features'), dict) else {}
 
-        c_name = model_dict.get('case_name') or d.get('case_name')
-        if c_name:
-            cn_str = str(c_name).strip()
-            shorthand_map = {
-                'c3': 'video_c3_rgb_sum',
-                'c4': 'video_c4_rgb_vorticity_sum',
-                'c5': 'video_c5_rgb_flow_sum',
-                'c6': 'video_c6_rgb_flow_vorticity_sum',
+        ch = video_dict.get('num_channels') or d.get('num_channels') or d.get('in_chans')
+        if ch is not None:
+            ch = int(ch)
+            video_dict['num_channels'] = ch
+            channel_names = {
+                3: 'video_c3_rgb_sum',
+                4: 'video_c4_rgb_vorticity_sum',
+                5: 'video_c5_rgb_flow_sum',
+                6: 'video_c6_rgb_flow_vorticity_sum',
             }
-            if cn_str.lower() in shorthand_map:
-                cn_str = shorthand_map[cn_str.lower()]
-                model_dict['case_name'] = cn_str
-
-            cn_lower = cn_str.lower()
-            if 'video_c3' in cn_lower or '_c3_' in cn_lower or cn_lower.endswith('_c3'):
-                video_dict['num_channels'] = 3
-            elif 'video_c4' in cn_lower or '_c4_' in cn_lower or cn_lower.endswith('_c4'):
-                video_dict['num_channels'] = 4
-            elif 'video_c5' in cn_lower or '_c5_' in cn_lower or cn_lower.endswith('_c5'):
-                video_dict['num_channels'] = 5
-            elif 'video_c6' in cn_lower or '_c6_' in cn_lower or cn_lower.endswith('_c6'):
-                video_dict['num_channels'] = 6
-
+            if not model_dict.get('case_name') and ch in channel_names:
+                model_dict['case_name'] = channel_names[ch]
+        elif model_dict.get('case_name'):
+            c_name = str(model_dict['case_name']).lower()
+            if 'c3' in c_name: video_dict['num_channels'] = 3
+            elif 'c4' in c_name: video_dict['num_channels'] = 4
+            elif 'c5' in c_name: video_dict['num_channels'] = 5
+            elif 'c6' in c_name: video_dict['num_channels'] = 6
         if model_dict:
             d['model'] = model_dict
         if video_dict:
@@ -525,6 +520,14 @@ class TrainConfig(BaseModel):
     @in_chans.setter
     def in_chans(self, val: int) -> None:
         self.video_features.num_channels = val
+        channel_names = {
+            3: 'video_c3_rgb_sum',
+            4: 'video_c4_rgb_vorticity_sum',
+            5: 'video_c5_rgb_flow_sum',
+            6: 'video_c6_rgb_flow_vorticity_sum',
+        }
+        if val in channel_names:
+            self.model.case_name = channel_names[val]
 
     @property
     def temporal_mode(self) -> str:
@@ -552,7 +555,17 @@ class TrainConfig(BaseModel):
 
     @property
     def case_name(self) -> Optional[str]:
-        return getattr(self.model, "case_name", None)
+        ch = getattr(self.video_features, 'num_channels', 6)
+        channel_names = {
+            3: 'video_c3_rgb_sum',
+            4: 'video_c4_rgb_vorticity_sum',
+            5: 'video_c5_rgb_flow_sum',
+            6: 'video_c6_rgb_flow_vorticity_sum',
+        }
+        val = getattr(self.model, 'case_name', None)
+        if val and val not in channel_names.values():
+            return val
+        return channel_names.get(ch, f'video_c{ch}_sum')
 
     @case_name.setter
     def case_name(self, val: Optional[str]) -> None:

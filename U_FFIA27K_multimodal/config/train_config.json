@@ -33,19 +33,9 @@
   "model": {
     "backbone": "MultimodalSOTANet",
     "modality": "video",
-    "case_name": "video_c4_rgb_vorticity_sum",
     "classes_num": 4,
     "embed_dim": 384,
-    "audio_hidden_dims": [
-      768,
-      512
-    ],
-    "video_drop_path": 0.1,
-    "tie_breakers": {
-      "enable_b12": false,
-      "enable_b23": false,
-      "enable_b13": false
-    }
+    "video_drop_path": 0.1
   },
   "video_features": {
     "image_size": 224,
