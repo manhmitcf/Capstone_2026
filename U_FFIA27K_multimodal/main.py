@@ -440,6 +440,8 @@ def run_training_session(
     fold_index: Optional[int] = None,
     lr_scheduler: Optional[str] = None,
     eta_min: Optional[float] = None,
+    fusion_type: Optional[str] = None,
+    case_name: Optional[str] = None,
     resume: bool = False,
 ) -> None:
     pkg_dir = Path(__file__).resolve().parent
@@ -449,6 +451,10 @@ def run_training_session(
         artifact_upload_config_path = str(pkg_dir / "config" / "artifact_upload_config.json")
 
     config = TrainConfig.from_json(train_config_path)
+    if fusion_type is not None:
+        config.fusion_type = fusion_type
+    if case_name is not None:
+        config.case_name = case_name
     if seed is not None:
         config.seed = seed
         config.dataset_splitter.seed = seed
@@ -579,6 +585,8 @@ def main() -> None:
     parser.add_argument("--lr-scheduler", type=str, choices=["onecycle", "cosine", "constant", "fixed", "none"], default=None, help="Override learning rate scheduler")
     parser.add_argument("--eta-min", type=float, default=None, help="Override minimum LR (eta_min) for CosineAnnealingLR")
     parser.add_argument("--resume", action="store_true", help="Resume training from last_model.pth if available")
+    parser.add_argument("--fusion", "-f", type=str, choices=["gating", "sum", "concat"], default=None, help="Flat multimodal fusion type (gating, sum, or concat)")
+    parser.add_argument("--case", type=str, choices=["fusion_gating", "fusion_sum", "fusion_concat", "gating", "sum", "concat"], default=None, help="Ablation case name or shorthand")
     args = parser.parse_args()
 
     run_training_session(
@@ -592,6 +600,8 @@ def main() -> None:
         lr_scheduler=args.lr_scheduler,
         eta_min=args.eta_min,
         resume=args.resume,
+        fusion_type=args.fusion,
+        case_name=args.case,
     )
 
 

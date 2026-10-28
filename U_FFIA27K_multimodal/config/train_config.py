@@ -328,6 +328,30 @@ class TrainConfig(BaseModel):
         if loss_dict:
             d["loss"] = loss_dict
 
+        # 5. Model cluster auto-configuration for flat fusion ablation
+        model_dict = dict(d.get('model', {})) if isinstance(d.get('model'), dict) else {}
+        ft = model_dict.get('fusion_type') or d.get('fusion_type')
+        c_name = model_dict.get('case_name') or d.get('case_name')
+
+        if c_name and not ft:
+            cn_clean = str(c_name).strip().lower()
+            if 'gating' in cn_clean: ft = 'gating'
+            elif 'sum' in cn_clean: ft = 'sum'
+            elif 'concat' in cn_clean: ft = 'concat'
+
+        if ft:
+            ft_clean = str(ft).strip().lower()
+            if ft_clean.startswith('fusion_'):
+                ft_clean = ft_clean.replace('fusion_', '')
+            model_dict['fusion_type'] = ft_clean
+            if not model_dict.get('case_name'):
+                model_dict['case_name'] = f'fusion_{ft_clean}'
+        elif not model_dict.get('case_name'):
+            model_dict['case_name'] = 'fusion_gating'
+
+        model_dict['head_type'] = 'flat'
+        d['model'] = model_dict
+
         return d
 
     # -------------------------------------------------------------------------
@@ -520,7 +544,11 @@ class TrainConfig(BaseModel):
 
     @fusion_type.setter
     def fusion_type(self, val: str) -> None:
-        self.model.fusion_type = val
+        val_clean = str(val).strip().lower()
+        if val_clean.startswith('fusion_'):
+            val_clean = val_clean.replace('fusion_', '')
+        self.model.fusion_type = val_clean
+        self.model.case_name = f'fusion_{val_clean}'
 
     @property
     def head_type(self) -> str:
@@ -531,13 +559,26 @@ class TrainConfig(BaseModel):
         self.model.head_type = val
 
     @property
-    def case_name(self) -> Optional[str]:
-        return getattr(self.model, "case_name", None)
+    def case_name(self) -> str:
+        val = getattr(self.model, 'case_name', None)
+        standard_cases = {'fusion_gating', 'fusion_sum', 'fusion_concat'}
+        if val and val not in standard_cases:
+            return val
+        ft = getattr(self.model, 'fusion_type', 'gating')
+        return f'fusion_{ft}'
 
     @case_name.setter
     def case_name(self, val: Optional[str]) -> None:
-        self.model.case_name = val
-
+        if val is not None:
+            val_clean = str(val).strip().lower()
+            if val_clean in ('gating', 'sum', 'concat'):
+                val = f'fusion_{val_clean}'
+                self.model.fusion_type = val_clean
+            elif val_clean in ('fusion_gating', 'fusion_sum', 'fusion_concat'):
+                self.model.fusion_type = val_clean.replace('fusion_', '')
+            self.model.case_name = val
+        else:
+            self.model.case_name = None
     @property
     def load_audio(self) -> bool:
         return getattr(self.dataset_splitter, "load_audio", True)
