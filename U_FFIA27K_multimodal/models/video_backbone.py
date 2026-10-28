@@ -147,7 +147,7 @@ class ConvNeXtNanoVideoBackbone(nn.Module):
         self.norm_final = nn.LayerNorm(dims[-1], eps=1e-6)
 
         # 5. Temporal composite LayerNorm
-        self.norm_composite = nn.LayerNorm(embed_dim, eps=1e-6)
+        self.norm_composite = nn.LayerNorm(embed_dim, eps=1e-6) if temporal_mode == 'composite_ln' else None
 
     def forward_features(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -182,7 +182,7 @@ class ConvNeXtNanoVideoBackbone(nn.Module):
         tokens_video = flat_tokens.view(B, T, self.embed_dim)
 
         if T < 2:
-            return self.norm_composite(tokens_video[:, 0])
+            return self.norm_composite(tokens_video[:, 0]) if self.norm_composite is not None else tokens_video[:, 0]
 
         if self.temporal_mode == "composite_ln":
             v_sum = tokens_video[:, 0] + tokens_video[:, 1]
