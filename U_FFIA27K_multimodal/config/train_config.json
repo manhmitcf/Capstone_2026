@@ -8,7 +8,7 @@
     "ckpt_dir": "checkpoint"
   },
   "training": {
-    "epochs": 200,
+    "epochs": 400,
     "batch_size": 32,
     "learning_rate": 0.001,
     "weight_decay": 0.05,
@@ -41,7 +41,7 @@
     "video_drop_path": 0.1,
     "tie_breakers": {
       "enable_b12": false,
-      "enable_b23": true,
+      "enable_b23": false,
       "enable_b13": false
     }
   },
@@ -49,7 +49,7 @@
     "image_size": 224,
     "num_frames": 2,
     "num_channels": 6,
-    "temporal_mode": "composite_ln"
+    "temporal_mode": "sum"
   },
   "audio_features": {
     "sample_rate": 256000,
