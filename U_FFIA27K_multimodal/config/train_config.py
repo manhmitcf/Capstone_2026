@@ -324,6 +324,38 @@ class TrainConfig(BaseModel):
         if loss_dict:
             d["loss"] = loss_dict
 
+        # 5. Model & Video Features auto-synchronization for ablation studies
+        model_dict = dict(d.get('model', {})) if isinstance(d.get('model'), dict) else {}
+        video_dict = dict(d.get('video_features', {})) if isinstance(d.get('video_features'), dict) else {}
+
+        c_name = model_dict.get('case_name') or d.get('case_name')
+        if c_name:
+            cn_str = str(c_name).strip()
+            shorthand_map = {
+                'c3': 'video_c3_rgb_sum',
+                'c4': 'video_c4_rgb_vorticity_sum',
+                'c5': 'video_c5_rgb_flow_sum',
+                'c6': 'video_c6_rgb_flow_vorticity_sum',
+            }
+            if cn_str.lower() in shorthand_map:
+                cn_str = shorthand_map[cn_str.lower()]
+                model_dict['case_name'] = cn_str
+
+            cn_lower = cn_str.lower()
+            if 'video_c3' in cn_lower or '_c3_' in cn_lower or cn_lower.endswith('_c3'):
+                video_dict['num_channels'] = 3
+            elif 'video_c4' in cn_lower or '_c4_' in cn_lower or cn_lower.endswith('_c4'):
+                video_dict['num_channels'] = 4
+            elif 'video_c5' in cn_lower or '_c5_' in cn_lower or cn_lower.endswith('_c5'):
+                video_dict['num_channels'] = 5
+            elif 'video_c6' in cn_lower or '_c6_' in cn_lower or cn_lower.endswith('_c6'):
+                video_dict['num_channels'] = 6
+
+        if model_dict:
+            d['model'] = model_dict
+        if video_dict:
+            d['video_features'] = video_dict
+
         return d
 
     # -------------------------------------------------------------------------
@@ -524,7 +556,29 @@ class TrainConfig(BaseModel):
 
     @case_name.setter
     def case_name(self, val: Optional[str]) -> None:
-        self.model.case_name = val
+        if val is not None:
+            val_clean = str(val).strip()
+            shorthand_map = {
+                'c3': 'video_c3_rgb_sum',
+                'c4': 'video_c4_rgb_vorticity_sum',
+                'c5': 'video_c5_rgb_flow_sum',
+                'c6': 'video_c6_rgb_flow_vorticity_sum',
+            }
+            if val_clean.lower() in shorthand_map:
+                val = shorthand_map[val_clean.lower()]
+            self.model.case_name = val
+
+            cn_lower = str(val).lower()
+            if 'video_c3' in cn_lower or '_c3_' in cn_lower or cn_lower.endswith('_c3'):
+                self.video_features.num_channels = 3
+            elif 'video_c4' in cn_lower or '_c4_' in cn_lower or cn_lower.endswith('_c4'):
+                self.video_features.num_channels = 4
+            elif 'video_c5' in cn_lower or '_c5_' in cn_lower or cn_lower.endswith('_c5'):
+                self.video_features.num_channels = 5
+            elif 'video_c6' in cn_lower or '_c6_' in cn_lower or cn_lower.endswith('_c6'):
+                self.video_features.num_channels = 6
+        else:
+            self.model.case_name = None
 
     @property
     def load_audio(self) -> bool:

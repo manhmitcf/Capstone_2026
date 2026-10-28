@@ -438,6 +438,8 @@ def run_training_session(
     fold_index: Optional[int] = None,
     lr_scheduler: Optional[str] = None,
     eta_min: Optional[float] = None,
+    case_name: Optional[str] = None,
+    num_channels: Optional[int] = None,
     resume: bool = False,
 ) -> None:
     pkg_dir = Path(__file__).resolve().parent
@@ -447,6 +449,10 @@ def run_training_session(
         artifact_upload_config_path = str(pkg_dir / "config" / "artifact_upload_config.json")
 
     config = TrainConfig.from_json(train_config_path)
+    if case_name is not None:
+        config.case_name = case_name
+    if num_channels is not None:
+        config.in_chans = num_channels
     if seed is not None:
         config.seed = seed
         config.dataset_splitter.seed = seed
@@ -577,6 +583,8 @@ def main() -> None:
     parser.add_argument("--lr-scheduler", type=str, choices=["onecycle", "cosine", "constant", "fixed", "none"], default=None, help="Override learning rate scheduler")
     parser.add_argument("--eta-min", type=float, default=None, help="Override minimum LR (eta_min) for CosineAnnealingLR")
     parser.add_argument("--resume", action="store_true", help="Resume training from last_model.pth if available")
+    parser.add_argument("--case", type=str, default=None, help="Ablation case name or shorthand (e.g. video_c4_rgb_vorticity_sum, or c3, c4, c5, c6)")
+    parser.add_argument("--num-channels", "--channels", type=int, choices=[3, 4, 5, 6], default=None, help="Input video channels (3, 4, 5, 6)")
     args = parser.parse_args()
 
     run_training_session(
@@ -590,6 +598,8 @@ def main() -> None:
         lr_scheduler=args.lr_scheduler,
         eta_min=args.eta_min,
         resume=args.resume,
+        case_name=args.case,
+        num_channels=args.num_channels,
     )
 
 
