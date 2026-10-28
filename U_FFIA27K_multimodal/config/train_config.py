@@ -121,6 +121,14 @@ class ModelConfig(BaseModel):
         default="MultimodalSOTANet",
         description="Model architecture name exported by U_FFIA27K_multimodal.models."
     )
+    modality: str = Field(
+        default="multimodal",
+        description="Active modality: 'multimodal', 'video', or 'audio'."
+    )
+    case_name: Optional[str] = Field(
+        default=None,
+        description="Case identifier for experiment tracking (e.g. video_c6_composite_ln)."
+    )
     embed_dim: int = Field(default=384, description="Common multimodal embedding dimension.")
     audio_hidden_dims: Tuple[int, ...] = Field(
         default=(768, 512),
@@ -164,6 +172,14 @@ class SplitterConfig(BaseModel):
     include_video: bool = Field(
         default=True,
         description="Whether to scan video paths alongside audio paths."
+    )
+    load_video: bool = Field(
+        default=True,
+        description="Whether to load video frames."
+    )
+    load_audio: bool = Field(
+        default=True,
+        description="Whether to load audio waveforms."
     )
     split_strategy: str = Field(
         default="random_sample",
@@ -210,7 +226,7 @@ class TrainingConfig(BaseModel):
     batch_size: int = Field(default=32, gt=0, description="Training batch size.")
     learning_rate: float = Field(default=1e-3, gt=0, description="Initial learning rate.")
     min_lr: float = Field(default=1e-5, ge=0.0, description="Minimum learning rate for CosineAnnealingLR.")
-    eta_min: float = Field(default=1e-6, ge=0.0, description="Minimum learning rate for CosineAnnealingLR.")
+    eta_min: float = Field(default=1e-5, ge=0.0, description="Minimum learning rate for CosineAnnealingLR.")
     weight_decay: float = Field(default=0.05, ge=0, description="Weight decay factor for AdamW.")
     use_onecycle: Optional[bool] = Field(default=None, description="Legacy flag for OneCycleLR.")
     lr_scheduler: str = Field(
@@ -493,6 +509,38 @@ class TrainConfig(BaseModel):
     @audio_hidden_dims.setter
     def audio_hidden_dims(self, val: Tuple[int, ...]) -> None:
         self.model.audio_hidden_dims = val
+
+    @property
+    def modality(self) -> str:
+        return getattr(self.model, "modality", "multimodal")
+
+    @modality.setter
+    def modality(self, val: str) -> None:
+        self.model.modality = val
+
+    @property
+    def case_name(self) -> Optional[str]:
+        return getattr(self.model, "case_name", None)
+
+    @case_name.setter
+    def case_name(self, val: Optional[str]) -> None:
+        self.model.case_name = val
+
+    @property
+    def load_audio(self) -> bool:
+        return getattr(self.dataset_splitter, "load_audio", True)
+
+    @load_audio.setter
+    def load_audio(self, val: bool) -> None:
+        self.dataset_splitter.load_audio = val
+
+    @property
+    def load_video(self) -> bool:
+        return getattr(self.dataset_splitter, "load_video", True)
+
+    @load_video.setter
+    def load_video(self, val: bool) -> None:
+        self.dataset_splitter.load_video = val
 
 
     @classmethod

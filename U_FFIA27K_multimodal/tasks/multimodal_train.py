@@ -90,8 +90,12 @@ class MultimodalTrainer:
         self.train_config_path = train_config_path
 
         # Setup Loss
+        modality = getattr(self.config, "modality", "multimodal")
         loss_type = getattr(self.config, "loss_type", "pairwise_tournament")
-        if loss_type == "pairwise_tournament":
+        if modality == "video" or loss_type not in ("pairwise_tournament",):
+            self.loss_fn = ClipCELoss()
+            logger.info("Configured standard ClipCELoss (Unimodal Video / CE mode).")
+        else:
             self.loss_fn = PairwiseTournamentLoss(
                 weight_act=getattr(self.config, "weight_act", 0.5),
                 weight_pairwise=getattr(self.config, "weight_pairwise", 0.5),
@@ -99,9 +103,6 @@ class MultimodalTrainer:
                 aux_loss_weight=getattr(self.config, "aux_loss_weight", 0.3),
             ).to(self.device)
             logger.info("Configured PairwiseTournamentLoss (Activity Gate + 3 Boundaries).")
-        else:
-            self.loss_fn = ClipCELoss()
-            logger.info("Configured standard ClipCELoss.")
 
         # Training & Optimization settings
         self.weight_decay = getattr(self.config, "weight_decay", 0.05)
@@ -165,7 +166,8 @@ class MultimodalTrainer:
         self._init_logging_and_checkpoints()
 
     def _init_logging_and_checkpoints(self) -> None:
-        model_name = getattr(self.config.model, "backbone", getattr(self.model, "model_name", self.model.__class__.__name__))
+        case_name = getattr(self.config, "case_name", None)
+        model_name = case_name if case_name else getattr(self.config.model, "backbone", getattr(self.model, "model_name", self.model.__class__.__name__))
         self.run_dir = os.path.join(self.config.ckpt_dir, model_name)
 
         if self.config.dataset_splitter.evaluation_mode == "cross_validation" and self.config.dataset_splitter.fold_index is not None:
@@ -291,7 +293,7 @@ class MultimodalTrainer:
                 logger.error(f"Failed to load weights from '{path}': {exc_load}")
                 return False
 
-    def train(self) -> Dict[str, Any]:
+    def train(self, resume: bool = False) -> Dict[str, Any]:
         monitor_mode = str(getattr(self.config, "monitor", "val_acc")).strip().lower()
         is_dual = monitor_mode in ("both", "dual")
         logger.info(f"Starting training pipeline (Monitor mode: '{monitor_mode}', Dual-track: {is_dual})...")
@@ -321,7 +323,26 @@ class MultimodalTrainer:
         else:
             best_val_metric = float('inf')
 
-        for epoch in range(1, self.config.epochs + 1):
+        start_epoch = 1
+        if resume:
+            if os.path.exists(self.last_checkpoint_path):
+                logger.info(f"[*] Resuming training state from '{self.last_checkpoint_path}'...")
+                checkpoint = torch.load(self.last_checkpoint_path, map_location=self.device)
+                self.model.load_state_dict(checkpoint['model_state_dict'])
+                self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+                if self.scheduler is not None and checkpoint.get('scheduler_state_dict') is not None:
+                    self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+                start_epoch = checkpoint.get('epoch', 0) + 1
+                best_epoch = checkpoint.get('best_epoch', 1)
+                best_val_metric = checkpoint.get('best_val_metric', best_val_metric)
+                best_acc = checkpoint.get('best_acc', 0.0)
+                best_qwk = checkpoint.get('best_qwk', -1.0)
+                best_val_statistics = checkpoint.get('val_statistics', None)
+                logger.info(f"[*] Resumed successfully! Continuing training from epoch {start_epoch:03d}/{self.config.epochs:03d}...")
+            else:
+                logger.warning(f"[*] Resume requested but checkpoint not found at '{self.last_checkpoint_path}'. Starting from epoch 1.")
+
+        for epoch in range(start_epoch, self.config.epochs + 1):
             epoch_start_time = time.perf_counter()
             train_loss, train_acc, train_acc_v, train_acc_a, train_mAP = self._train_epoch(epoch)
             if self.scheduler is not None and self.lr_scheduler_type == "cosine":
@@ -446,9 +467,12 @@ class MultimodalTrainer:
                     _safe_torch_save(a_dict, self.best_audio_path)
 
                 logger.info(f"[*] New best validation performance! Saved checkpoints:")
-                logger.info(f"    - Full Multimodal Model:   '{self.best_checkpoint_path}' (Val Acc = {best_acc:.4f}, Val QWK = {best_qwk:.4f})")
-                logger.info(f"    - Peak Video Backbone:     '{self.best_video_path}'")
-                logger.info(f"    - Peak Audio Backbone:     '{self.best_audio_path}'")
+                model_label = "Model Checkpoint" if getattr(self.config, "modality", "multimodal") == "video" else "Full Multimodal Model"
+                logger.info(f"    - {model_label}:   '{self.best_checkpoint_path}' (Val Acc = {best_acc:.4f}, Val QWK = {best_qwk:.4f})")
+                if v_dict:
+                    logger.info(f"    - Peak Video Backbone:     '{self.best_video_path}'")
+                if a_dict:
+                    logger.info(f"    - Peak Audio Backbone:     '{self.best_audio_path}'")
 
             if is_dual:
                 logger.info(

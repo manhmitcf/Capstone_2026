@@ -76,21 +76,21 @@ class ConvNeXtBlock(nn.Module):
 
 class ConvNeXtNanoVideoBackbone(nn.Module):
     """
-    Streamlined ConvNeXt-Nano Video Backbone tailored for 6-channel kinematic inputs across T=2 frames (C6_rgb_flow_vorticity).
-    Channels:
-      - 0, 1, 2: Spatial RGB appearance
-      - 3, 4:    Optical Flow (u, v) swimming velocity
-      - 5:       Fluid Vorticity omega = dv/dx - du/dy
+    Streamlined ConvNeXt-Nano Video Backbone tailored for multi-channel kinematic inputs across T=2 frames.
+    Channels (configurable in_chans in {3, 4, 5, 6}):
+      - 3 channels: Spatial RGB appearance
+      - 4 channels: RGB + Fluid Vorticity omega = dv/dx - du/dy
+      - 5 channels: RGB + Optical Flow (u, v) swimming velocity
+      - 6 channels: RGB + Optical Flow (u, v) + Fluid Vorticity omega
 
     Architecture:
-      - Stem: Conv 4x4 (6 -> 48) + GroupNorm (4,752 params)
+      - Stem: Conv 4x4 (in_chans -> 48) + GroupNorm
       - Stage 1: 48ch  x 1 block  (DropPath linear schedule)
       - Stage 2: 96ch  x 1 block  (DropPath linear schedule)
       - Stage 3: 192ch x 3 blocks (DropPath linear schedule)
       - Stage 4: 384ch x 1 block  (DropPath linear schedule)
-      - Temporal Aggregation (composite_ln default): LN((v0 + v1) + |v1 - v0|)
+      - Temporal Aggregation (configurable via temporal_mode: 'sum', 'composite_ln', 'abs_diff')
       - Native 384-dim: Direct 384-dimensional representation preserving full channel capacity.
-      - Total parameters: 2,614,176 params (~2.614M).
     """
     def __init__(
         self,
@@ -100,7 +100,7 @@ class ConvNeXtNanoVideoBackbone(nn.Module):
         depths: Tuple[int, ...] = (1, 1, 3, 1),
         num_frames: int = 2,
         drop_path_rate: float = 0.1,
-        temporal_mode: str = "composite_ln",
+        temporal_mode: str = "sum",
         **kwargs
     ) -> None:
         super().__init__()
@@ -146,8 +146,8 @@ class ConvNeXtNanoVideoBackbone(nn.Module):
         # 4. Final normalization (native 384-dim)
         self.norm_final = nn.LayerNorm(dims[-1], eps=1e-6)
 
-        # 5. Temporal composite LayerNorm
-        self.norm_composite = nn.LayerNorm(embed_dim, eps=1e-6)
+        # 5. Temporal composite LayerNorm (only instantiated when temporal_mode == 'composite_ln')
+        self.norm_composite = nn.LayerNorm(embed_dim, eps=1e-6) if temporal_mode == "composite_ln" else None
 
     def forward_features(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -167,7 +167,7 @@ class ConvNeXtNanoVideoBackbone(nn.Module):
     def forward(self, frames: torch.Tensor) -> torch.Tensor:
         """
         Args:
-            frames: [B, T, C, H, W] tensor (C=6, T=2)
+            frames: [B, T, C, H, W] tensor (C=in_chans, T=2)
 
         Returns:
             f_video: Joint spatiotemporal video embedding [B, embed_dim]
@@ -182,7 +182,7 @@ class ConvNeXtNanoVideoBackbone(nn.Module):
         tokens_video = flat_tokens.view(B, T, self.embed_dim)
 
         if T < 2:
-            return self.norm_composite(tokens_video[:, 0])
+            return self.norm_composite(tokens_video[:, 0]) if self.norm_composite is not None else tokens_video[:, 0]
 
         if self.temporal_mode == "composite_ln":
             v_sum = tokens_video[:, 0] + tokens_video[:, 1]
@@ -193,6 +193,6 @@ class ConvNeXtNanoVideoBackbone(nn.Module):
         elif self.temporal_mode == "abs_diff":
             f_video = torch.abs(tokens_video[:, 1] - tokens_video[:, 0])
         else:
-            raise ValueError(f"Unknown temporal_mode: {self.temporal_mode}. Available: 'composite_ln', 'sum', 'abs_diff'.")
+            raise ValueError(f"Unknown temporal_mode: {self.temporal_mode}. Available: 'sum', 'composite_ln', 'abs_diff'.")
 
         return f_video

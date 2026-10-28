@@ -10,13 +10,13 @@ except ImportError:
 
 
 def count_parameters(model: nn.Module) -> Dict[str, Any]:
-    """Calculate detailed parameter breakdown for MultimodalSOTANet."""
+    """Calculate detailed parameter breakdown for MultimodalSOTANet or Unimodal models."""
     total_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-    video_params = sum(p.numel() for p in model.video_backbone.parameters() if p.requires_grad) if hasattr(model, "video_backbone") else 0
-    audio_params = sum(p.numel() for p in model.audio_backbone.parameters() if p.requires_grad) if hasattr(model, "audio_backbone") else 0
-    fusion_params = sum(p.numel() for p in model.fusion.parameters() if p.requires_grad) if hasattr(model, "fusion") else 0
-    kinematics_params = sum(p.numel() for p in model.motion_kinematics.parameters() if p.requires_grad) if hasattr(model, "motion_kinematics") else 0
+    video_params = sum(p.numel() for p in model.video_backbone.parameters() if p.requires_grad) if hasattr(model, "video_backbone") and model.video_backbone is not None else 0
+    audio_params = sum(p.numel() for p in model.audio_backbone.parameters() if p.requires_grad) if hasattr(model, "audio_backbone") and model.audio_backbone is not None else 0
+    fusion_params = sum(p.numel() for p in model.fusion.parameters() if p.requires_grad) if hasattr(model, "fusion") and model.fusion is not None else 0
+    kinematics_params = sum(p.numel() for p in model.motion_kinematics.parameters() if p.requires_grad) if hasattr(model, "motion_kinematics") and model.motion_kinematics is not None else 0
 
     breakdown = {
         "video_backbone": video_params,
@@ -37,7 +37,8 @@ def measure_flops(model: nn.Module, device: str = "cpu", num_frames: int = 2) ->
 
     model.eval()
     dummy_video = torch.randn(1, num_frames, 3, 224, 224, device=device)
-    dummy_audio = torch.randn(1, 512000, device=device)
+    is_video_only = getattr(model, "modality", "multimodal") == "video"
+    dummy_audio = torch.empty(0, device=device) if is_video_only else torch.randn(1, 512000, device=device)
 
     with FlopCounterMode(display=False) as flop_counter:
         with torch.no_grad():

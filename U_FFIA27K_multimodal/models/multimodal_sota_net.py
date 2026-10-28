@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from typing import Dict, Optional, Any, Tuple
 
-from features.motion_kinematics import FishMotionKinematics6Ch
+from features.motion_kinematics import FishMotionKinematics6Ch, FishMotionKinematics
 from features.audio_frontend import AudioFrontend
 from .video_backbone import ConvNeXtNanoVideoBackbone
 from .audio_backbone import AudioMLPBackbone
@@ -11,33 +11,17 @@ from .multimodal_fusion import MultimodalTournamentFusion
 
 class MultimodalSOTANet(nn.Module):
     """
-    Hierarchical Multimodal Tournament Network with Video Kinematics Tie-Breakers (Unified 384-dim).
-    Specifically architected to resolve fish feeding intensity assessment across 4 classes
-    (None, Strong, Medium, Weak) via 2-level tournament hierarchy with Configurable Video Kinematics
-    Tie-Breakers (B12, B23, B13):
+    Multimodal SOTA Network supporting both Multimodal Tournament and Pure Unimodal Video Ablation.
 
-      1. Visual-Kinematic Stream (~2.614M params):
-         6-Channel ConvNeXt-Nano (Spatial RGB + Flow (u, v) + Vorticity omega) with Stem Conv2d(6->48, k=4, s=4)
-         and Composite LayerNorm temporal aggregation (composite_ln) producing native 384-dim representation.
-      2. Acoustic Time-Frequency Stream (~2.173M params):
-         High-Resolution TKEO-STFT Audio Frontend (256 kHz, 2049 linear bins, 4,098 params)
-         + 2-hidden-layer AudioMLPBackbone (2049 -> 768 -> 512 -> 384, 2,168,448 params).
-      3. Pairwise Tournament Fusion (~0.374M params with B23 enabled):
-         - Direct Cross-Modal Reliability Gating: [w_V, w_A] = softmax(W[f_V || f_A]).
-           f_fused = LayerNorm(w_V * f_V + w_A * f_A) -> Directly fed into Tournament Head.
-         - Level 1: Feeding Activity Gating Head (None vs Active Feeding, unified 192-dim).
-         - Level 2: 3 Specialized Pairwise Subspace Heads on f_fused
-             with Configurable Video Kinematics Referees on f_video (B12, B23, B13).
-         - Dynamic Tie-Breaker Intervention (Sigmoid Reparameterization): logit = logit_base + gamma_eff * u_tie * logit_video.
-         - Tournament Borda Voting to derive final calibrated multi-class probabilities.
-      4. Auxiliary Unimodal Classifier Heads (3,080 params):
-         - Video Aux Head: Linear(384, 4)
-         - Audio Aux Head: Linear(384, 4)
-
-    Total Parameters:
-      - Default (B23 enabled): 5,164,594 (~5.165M) | 121 parameter tensors.
-      - All 3 Referees enabled: 5,313,590 (~5.314M) | 135 parameter tensors.
-      - Pure Baseline (0 Referees): 5,090,096 (~5.090M) | 114 parameter tensors.
+    In Unimodal Video mode (modality='video'):
+      - Audio frontend, Audio MLP backbone, Multimodal Tournament Fusion, and Audio Aux Head are bypassed.
+      - ConvNeXt-Nano video backbone natively supports dynamic in_chans in {3, 4, 5, 6}:
+          * 3 channels: RGB only (~2.613M params)
+          * 4 channels: RGB + Fluid Vorticity omega (~2.613M params)
+          * 5 channels: RGB + Optical Flow (u, v) (~2.614M params)
+          * 6 channels: RGB + Optical Flow (u, v) + Fluid Vorticity omega (~2.615M params)
+      - Directly outputs 4-class logits via Linear(384 -> 4).
+      - Guarantees 100% active gradient flow with zero dangling parameters.
     """
     model_name: str = "MultimodalSOTANet"
 
@@ -49,10 +33,11 @@ class MultimodalSOTANet(nn.Module):
         image_size: int = 224,
         num_frames: int = 2,
         in_chans: int = 6,
-        temporal_mode: str = "composite_ln",
+        temporal_mode: str = "sum",
         audio_hidden_dims: Tuple[int, ...] = (768, 512),
         tie_breakers: Optional[Any] = None,
         video_drop_path: float = 0.1,
+        modality: str = "multimodal",
         **kwargs
     ) -> None:
         super().__init__()
@@ -65,12 +50,12 @@ class MultimodalSOTANet(nn.Module):
         self.audio_hidden_dims = audio_hidden_dims
         self.tie_breakers = tie_breakers
         self.video_drop_path = video_drop_path
+        self.modality = str(modality).strip().lower() if modality else "multimodal"
 
-        # 1. Frontends
-        self.audio_frontend = audio_frontend if audio_frontend is not None else AudioFrontend()
-        self.motion_kinematics = FishMotionKinematics6Ch(image_size=image_size)
+        # 1. Frontends & Motion Kinematics
+        self.motion_kinematics = FishMotionKinematics(in_chans=in_chans, image_size=image_size)
 
-        # 2. Backbones (~4.78M)
+        # 2. Video Backbone & Classifier Head
         self.video_backbone = ConvNeXtNanoVideoBackbone(
             embed_dim=embed_dim,
             in_chans=in_chans,
@@ -78,69 +63,87 @@ class MultimodalSOTANet(nn.Module):
             drop_path_rate=video_drop_path,
             temporal_mode=temporal_mode,
         )
-        self.audio_backbone = AudioMLPBackbone(
-            in_features=2049,
-            hidden_dims=audio_hidden_dims,
-            embed_dim=embed_dim,
-            dropout=0.1,
-        )
-
-        # 3. Multimodal Tournament Fusion (Direct Gated, 384-dim)
-        self.fusion = MultimodalTournamentFusion(
-            dim=embed_dim,
-            tie_breakers=tie_breakers,
-            **kwargs
-        )
-
-        # 4. Auxiliary Unimodal Classifier Heads (3,080 params)
-        # Allows independent supervision, accuracy tracking, and multi-objective optimization
         self.aux_head_video = nn.Linear(embed_dim, classes_num)
-        self.aux_head_audio = nn.Linear(embed_dim, classes_num)
+
+        # 3. Audio & Multimodal Fusion (only instantiated when not pure unimodal video)
+        if self.modality != "video":
+            self.audio_frontend = audio_frontend if audio_frontend is not None else AudioFrontend()
+            self.audio_backbone = AudioMLPBackbone(
+                in_features=2049,
+                hidden_dims=audio_hidden_dims,
+                embed_dim=embed_dim,
+                dropout=0.1,
+            )
+            self.fusion = MultimodalTournamentFusion(
+                dim=embed_dim,
+                tie_breakers=tie_breakers,
+                **kwargs
+            )
+            self.aux_head_audio = nn.Linear(embed_dim, classes_num)
+        else:
+            self.audio_frontend = None
+            self.audio_backbone = None
+            self.fusion = None
+            self.aux_head_audio = None
 
     def forward(
         self,
         video_input: torch.Tensor,
-        audio_input: torch.Tensor
+        audio_input: Optional[torch.Tensor] = None
     ) -> Dict[str, torch.Tensor]:
         """
-        Hierarchical End-to-End Forward Pass:
-          Raw Inputs:
-            - video_input: [B, 2, 3, 224, 224] (RGB multi-frame clip)
-            - audio_input: [B, 512000] (2.0s @ 256 kHz raw 1D acoustic waveform)
-          Returns:
-            - Full prediction dictionary containing tournament voting probabilities,
-              calibrated logits, pairwise boundaries, uncertainty, and unimodal logits.
+        Forward Pass:
+          In 'video' modality mode:
+            - Extracts motion kinematics channels according to in_chans.
+            - Processes through ConvNeXt-Nano Video Backbone with temporal_mode aggregation.
+            - Projects through classification head.
+          In 'multimodal' mode:
+            - Executes full hierarchical tournament fusion.
         """
-        # Step 1: Preprocessing & Frontend Extraction (with unbatched single-sample guards)
+        # --- Pure Unimodal Video Execution Fast-Path ---
+        if self.modality == "video":
+            if video_input.ndim == 4:
+                video_input = video_input.unsqueeze(0)
+            if video_input.ndim == 5 and video_input.size(2) == 3:
+                frames_ch, _ = self.motion_kinematics(video_input)
+            else:
+                frames_ch = video_input
+
+            f_video = self.video_backbone(frames_ch)
+            logits_video = self.aux_head_video(f_video)
+            return {
+                "logits": logits_video,
+                "clipwise_output": logits_video,
+                "logits_video": logits_video,
+                "f_video": f_video,
+            }
+
+        # --- Multimodal Execution Path ---
         if video_input.ndim == 4:
             video_input = video_input.unsqueeze(0)
         if video_input.ndim == 5 and video_input.size(2) == 3:
-            frames_6ch, _ = self.motion_kinematics(video_input)
+            frames_ch, _ = self.motion_kinematics(video_input)
         else:
-            frames_6ch = video_input
+            frames_ch = video_input
 
-        if audio_input.ndim >= 1 and audio_input.size(-1) > 2049:
+        if audio_input is not None and audio_input.ndim >= 1 and audio_input.size(-1) > 2049:
             stft_feat = self.audio_frontend(audio_input)
         else:
-            stft_feat = audio_input
+            stft_feat = audio_input if audio_input is not None else torch.zeros(frames_ch.size(0), 2049, device=frames_ch.device)
         if stft_feat.ndim == 1:
             stft_feat = stft_feat.unsqueeze(0)
 
-        # Step 2: Unimodal Spatiotemporal Feature Extraction
-        f_video = self.video_backbone(frames_6ch)
+        f_video = self.video_backbone(frames_ch)
         f_audio = self.audio_backbone(stft_feat)
 
-        # Auxiliary Unimodal Logits (for standalone evaluation & multi-objective training)
         logits_video = self.aux_head_video(f_video)
         logits_audio = self.aux_head_audio(f_audio)
 
-        # Step 3: Direct Gated Multimodal Tournament Fusion with Video Tie-Breakers
         fusion_outputs = self.fusion(
             f_video=f_video,
             f_audio=f_audio
         )
 
-        # Step 4: Assemble Comprehensive Output via dict unpacking
         outputs = {
             **fusion_outputs,
             "logits_video": logits_video,
@@ -149,5 +152,4 @@ class MultimodalSOTANet(nn.Module):
         if "logits" not in outputs and "clipwise_output" in outputs:
             outputs["logits"] = outputs["clipwise_output"]
 
-        # Filter out None values to maintain clean output dictionary
         return {k: v for k, v in outputs.items() if v is not None}

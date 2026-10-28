@@ -6,19 +6,26 @@ from typing import Tuple
 
 class FishMotionKinematics6Ch(nn.Module):
     """
-    Differentiable 6-Channel Motion Kinematics Extractor for Fish Feeding Intensity Assessment (C6_rgb_flow_vorticity):
+    Differentiable Motion Kinematics Extractor for Fish Feeding Intensity Assessment:
       - Channels 0-2 : Spatial RGB appearance (fish clustering, surface foam, feeding pellets)
       - Channels 3-4 : Dense Optical Flow (u, v) representing horizontal and vertical swimming velocities
       - Channel 5    : Fluid Vorticity omega = dv/dx - du/dy (swirling vortex turbulence from feeding strikes)
 
+    Supports dynamic input channel configurations (in_chans in {3, 4, 5, 6}):
+      - 3 channels: RGB only
+      - 4 channels: RGB + Fluid Vorticity omega
+      - 5 channels: RGB + Optical Flow (u, v)
+      - 6 channels: RGB + Optical Flow (u, v) + Fluid Vorticity omega
+
     Input:
         frames_rgb: [B, T, 3, H, W] (T >= 1, nominally T=2)
     Output:
-        frames_6ch: [B, T, 6, H, W]
+        frames_out: [B, T, in_chans, H, W]
         kinematics_summary: [B, 4] lightweight summary tensor [u_mean, v_mean, omega_mean, omega_max]
     """
-    def __init__(self, image_size: int = 224) -> None:
+    def __init__(self, in_chans: int = 6, image_size: int = 224) -> None:
         super().__init__()
+        self.in_chans = in_chans
         self.image_size = image_size  # Retained for API compatibility; Sobel filtering is resolution-agnostic
 
         # Fixed Sobel spatial gradient filters (channel=1)
@@ -35,6 +42,10 @@ class FishMotionKinematics6Ch(nn.Module):
         B, T, _, H, W = frames_rgb.shape
         device = frames_rgb.device
         dtype = frames_rgb.dtype
+
+        if self.in_chans == 3:
+            dummy_summary = torch.zeros(B, 4, dtype=dtype, device=device)
+            return frames_rgb, dummy_summary
 
         # Unnormalize ImageNet normalization to [0, 1] for physics calculations
         rgb_flat = frames_rgb.view(B * T, 3, H, W)
@@ -79,15 +90,29 @@ class FishMotionKinematics6Ch(nn.Module):
         omega_flat = torch.tanh((dv_dx - du_dy) * 4.0)  # normalized vorticity
         omega_seq = omega_flat.view(B, T, 1, H, W)
 
-        # Assemble finalized 6 channels: [R, G, B, u, v, omega]
-        frames_6ch = torch.cat([frames_rgb, u_seq, v_seq, omega_seq], dim=2)  # [B, T, 6, H, W]
-
-        # Lightweight summary tensor [B, 4] (pure kinematics: u, v, omega)
+        # Lightweight summary components
         u_mean = torch.mean(torch.abs(u_seq), dim=(1, 2, 3, 4), keepdim=True).view(B, 1)
         v_mean = torch.mean(torch.abs(v_seq), dim=(1, 2, 3, 4), keepdim=True).view(B, 1)
         omega_mean = torch.mean(torch.abs(omega_seq), dim=(1, 2, 3, 4), keepdim=True).view(B, 1)
         omega_max = torch.amax(torch.abs(omega_seq), dim=(1, 2, 3, 4), keepdim=True).view(B, 1)
-        kinematics_summary = torch.cat([u_mean, v_mean, omega_mean, omega_max], dim=-1)
 
-        return frames_6ch, kinematics_summary
+        if self.in_chans == 4:
+            # RGB + Fluid Vorticity omega (4 channels)
+            frames_out = torch.cat([frames_rgb, omega_seq], dim=2)
+            kinematics_summary = torch.cat([omega_mean, omega_max, torch.zeros(B, 2, dtype=dtype, device=device)], dim=-1)
+        elif self.in_chans == 5:
+            # RGB + Optical Flow (u, v) (5 channels)
+            frames_out = torch.cat([frames_rgb, u_seq, v_seq], dim=2)
+            kinematics_summary = torch.cat([u_mean, v_mean, torch.zeros(B, 2, dtype=dtype, device=device)], dim=-1)
+        elif self.in_chans == 6:
+            # RGB + Optical Flow (u, v) + Fluid Vorticity omega (6 channels)
+            frames_out = torch.cat([frames_rgb, u_seq, v_seq, omega_seq], dim=2)
+            kinematics_summary = torch.cat([u_mean, v_mean, omega_mean, omega_max], dim=-1)
+        else:
+            raise ValueError(f"Unsupported in_chans={self.in_chans}. Expected 3, 4, 5, or 6.")
 
+        return frames_out, kinematics_summary
+
+
+# Backward compatibility alias
+FishMotionKinematics = FishMotionKinematics6Ch
