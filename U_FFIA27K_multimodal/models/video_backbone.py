@@ -88,9 +88,8 @@ class ConvNeXtNanoVideoBackbone(nn.Module):
       - Stage 2: 96ch  x 1 block  (DropPath linear schedule)
       - Stage 3: 192ch x 3 blocks (DropPath linear schedule)
       - Stage 4: 384ch x 1 block  (DropPath linear schedule)
-      - Temporal Aggregation (composite_ln default): LN((v0 + v1) + |v1 - v0|)
+      - Temporal Aggregation (configurable via temporal_mode: 'composite_ln', 'sum', 'abs_diff')
       - Native 384-dim: Direct 384-dimensional representation preserving full channel capacity.
-      - Total parameters: 2,614,176 params (~2.614M).
     """
     def __init__(
         self,
@@ -146,8 +145,8 @@ class ConvNeXtNanoVideoBackbone(nn.Module):
         # 4. Final normalization (native 384-dim)
         self.norm_final = nn.LayerNorm(dims[-1], eps=1e-6)
 
-        # 5. Temporal composite LayerNorm
-        self.norm_composite = nn.LayerNorm(embed_dim, eps=1e-6)
+        # 5. Temporal composite LayerNorm (only instantiated when temporal_mode == 'composite_ln')
+        self.norm_composite = nn.LayerNorm(embed_dim, eps=1e-6) if temporal_mode == "composite_ln" else None
 
     def forward_features(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -182,7 +181,7 @@ class ConvNeXtNanoVideoBackbone(nn.Module):
         tokens_video = flat_tokens.view(B, T, self.embed_dim)
 
         if T < 2:
-            return self.norm_composite(tokens_video[:, 0])
+            return self.norm_composite(tokens_video[:, 0]) if self.norm_composite is not None else tokens_video[:, 0]
 
         if self.temporal_mode == "composite_ln":
             v_sum = tokens_video[:, 0] + tokens_video[:, 1]
