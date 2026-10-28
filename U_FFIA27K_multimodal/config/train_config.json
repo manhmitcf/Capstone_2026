@@ -52,7 +52,7 @@
     "image_size": 224,
     "num_frames": 2,
     "num_channels": 6,
-    "temporal_mode": "composite_ln"
+    "temporal_mode": "sum"
   },
   "audio_features": {
     "sample_rate": 256000,
