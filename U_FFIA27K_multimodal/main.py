@@ -374,7 +374,7 @@ def upload_artifact_if_enabled(upload_config: ArtifactUploadConfig, config: Trai
     output_zip_path = str(zip_parent / artifact_filename)
     artifact_zip = zip_directory(source_dir, output_zip_path)
 
-    target_branch = getattr(upload_config, "branch", None) or "final"
+    target_branch = getattr(upload_config, "branch", None) or "main"
     if upload_config.create_repo:
         try:
             create_repo(
@@ -405,15 +405,19 @@ def upload_artifact_if_enabled(upload_config: ArtifactUploadConfig, config: Trai
     logger.info(f"Branch:                               '{target_branch}'")
     logger.info("==================================================")
 
-    upload_file(
-        path_or_fileobj=artifact_zip,
-        path_in_repo=artifact_filename,
-        repo_id=upload_config.repo_id,
-        repo_type=upload_config.repo_type,
-        token=token,
-        revision=target_branch,
-    )
-    logger.info("Artifact upload to Hugging Face completed successfully!")
+    try:
+        upload_file(
+            path_or_fileobj=artifact_zip,
+            path_in_repo=artifact_filename,
+            repo_id=upload_config.repo_id,
+            repo_type=upload_config.repo_type,
+            token=token,
+            revision=target_branch,
+        )
+        logger.info("Artifact upload to Hugging Face completed successfully!")
+    except Exception as exc:
+        logger.error(f"Hugging Face artifact upload failed: {exc}")
+        logger.info(f"Local training checkpoints remain completely intact at: '{config.ckpt_dir}'")
 
 
 def run_training_session(
