@@ -55,6 +55,7 @@ class MultimodalSOTANet(nn.Module):
         video_drop_path: float = 0.1,
         fusion_type: str = "gating",
         head_type: str = "tournament",
+        gate_activation: str = "sigmoid",
         **kwargs
     ) -> None:
         super().__init__()
@@ -69,6 +70,7 @@ class MultimodalSOTANet(nn.Module):
         self.video_drop_path = video_drop_path
         self.fusion_type = str(fusion_type).strip().lower()
         self.head_type = str(head_type).strip().lower()
+        self.gate_activation = str(gate_activation).strip().lower()
 
         # 1. Frontends
         self.audio_frontend = audio_frontend if audio_frontend is not None else AudioFrontend()
@@ -96,6 +98,7 @@ class MultimodalSOTANet(nn.Module):
             tie_breakers=tie_breakers,
             fusion_type=fusion_type,
             head_type=head_type,
+            gate_activation=self.gate_activation,
             **kwargs
         )
 

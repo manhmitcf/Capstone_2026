@@ -129,6 +129,10 @@ class ModelConfig(BaseModel):
         default="flat",
         description="Decision head type: 'tournament' or 'flat'."
     )
+    gate_activation: str = Field(
+        default="sigmoid",
+        description="Gate activation function: 'sigmoid' (independent gating) or 'softmax' (convex combination)."
+    )
     case_name: Optional[str] = Field(
         default=None,
         description="Case identifier for experiment tracking (e.g. fusion_gating)."
@@ -349,6 +353,8 @@ class TrainConfig(BaseModel):
         elif not model_dict.get('case_name'):
             model_dict['case_name'] = 'fusion_gating'
 
+        if 'gate_activation' in d:
+            model_dict['gate_activation'] = d.pop('gate_activation')
         model_dict.setdefault('head_type', 'flat')
         d['model'] = model_dict
 
@@ -570,6 +576,14 @@ class TrainConfig(BaseModel):
     @head_type.setter
     def head_type(self, val: str) -> None:
         self.model.head_type = val
+
+    @property
+    def gate_activation(self) -> str:
+        return getattr(self.model, "gate_activation", "sigmoid")
+
+    @gate_activation.setter
+    def gate_activation(self, val: str) -> None:
+        self.model.gate_activation = str(val).strip().lower()
 
     @property
     def case_name(self) -> str:

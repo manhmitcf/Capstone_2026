@@ -312,6 +312,7 @@ class MultimodalTournamentFusion(nn.Module):
         tie_breakers: Optional[Any] = None,
         fusion_type: str = "gating",
         head_type: str = "tournament",
+        gate_activation: str = "sigmoid",
         **kwargs
     ) -> None:
         super().__init__()
@@ -321,12 +322,19 @@ class MultimodalTournamentFusion(nn.Module):
         self.classes_num = classes_num
         self.fusion_type = str(fusion_type).strip().lower()
         self.head_type = str(head_type).strip().lower()
+        self.gate_activation = str(kwargs.get("gate_activation", gate_activation)).strip().lower()
 
         if self.head_type == "flat":
             if self.fusion_type == "gating":
+                if self.gate_activation == "softmax":
+                    gate_act_layer = nn.Softmax(dim=-1)
+                elif self.gate_activation == "sigmoid":
+                    gate_act_layer = nn.Sigmoid()
+                else:
+                    raise ValueError(f"Unknown gate_activation: '{self.gate_activation}'. Expected 'sigmoid' or 'softmax'.")
                 self.gate = nn.Sequential(
                     nn.Linear(dim * 2, 2),
-                    nn.Softmax(dim=-1)
+                    gate_act_layer
                 )
                 self.norm_fused = nn.LayerNorm(dim)
                 self.classifier = nn.Linear(dim, classes_num)
@@ -345,9 +353,14 @@ class MultimodalTournamentFusion(nn.Module):
             self.enable_b12, self.enable_b23, self.enable_b13 = _parse_tie_breakers(
                 tie_breakers, enable_b12, enable_b23, enable_b13
             )
+            t_gate_act = str(kwargs.get("gate_activation", self.gate_activation)).strip().lower()
+            if t_gate_act == "sigmoid":
+                gate_act_layer = nn.Sigmoid()
+            else:
+                gate_act_layer = nn.Softmax(dim=-1)
             self.gate = nn.Sequential(
                 nn.Linear(dim * 2, 2),
-                nn.Softmax(dim=-1)
+                gate_act_layer
             )
             self.norm_fused = nn.LayerNorm(dim)
             self.classifier = None
