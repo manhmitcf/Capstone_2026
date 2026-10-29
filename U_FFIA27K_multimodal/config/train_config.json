@@ -8,32 +8,25 @@
     "ckpt_dir": "checkpoint"
   },
   "training": {
-    "epochs": 200,
+    "epochs": 400,
     "batch_size": 32,
-    "learning_rate": 0.0001,
+    "learning_rate": 0.001,
     "weight_decay": 0.05,
-    "eta_min": 1e-05,
-    "use_onecycle": false,
-    "lr_scheduler": "cosine"
+    "lr_scheduler": "onecycle"
   },
   "evaluation": {
     "monitor": "val_acc",
     "mode": "max",
-    "early_stopping": true,
+    "early_stopping": false,
     "patience": 40,
     "min_delta": 0.0001
   },
   "loss": {
-    "loss_type": "ce",
-    "weight_act": 0.5,
-    "weight_pairwise": 0.5,
-    "weight_ce": 1.0,
-    "aux_loss_weight": 0.3
+    "loss_type": "ce"
   },
   "model": {
     "backbone": "MultimodalSOTANet",
     "fusion_type": "gating",
-    "head_type": "flat",
     "classes_num": 4,
     "embed_dim": 384,
     "audio_hidden_dims": [

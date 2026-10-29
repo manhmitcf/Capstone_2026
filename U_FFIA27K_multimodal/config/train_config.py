@@ -126,7 +126,7 @@ class ModelConfig(BaseModel):
         description="Multimodal fusion mechanism: 'gating', 'sum', or 'concat'."
     )
     head_type: str = Field(
-        default="tournament",
+        default="flat",
         description="Decision head type: 'tournament' or 'flat'."
     )
     case_name: Optional[str] = Field(
@@ -226,7 +226,7 @@ class TrainingConfig(BaseModel):
     """
     Optimization hyperparameters and scheduler configuration.
     """
-    epochs: int = Field(default=200, gt=0, description="Total number of training epochs.")
+    epochs: int = Field(default=400, gt=0, description="Total number of training epochs.")
     batch_size: int = Field(default=32, gt=0, description="Training batch size.")
     learning_rate: float = Field(default=1e-3, gt=0, description="Initial learning rate.")
     min_lr: float = Field(default=1e-5, ge=0.0, description="Minimum learning rate for CosineAnnealingLR.")
@@ -349,8 +349,21 @@ class TrainConfig(BaseModel):
         elif not model_dict.get('case_name'):
             model_dict['case_name'] = 'fusion_gating'
 
-        model_dict['head_type'] = 'flat'
+        model_dict.setdefault('head_type', 'flat')
         d['model'] = model_dict
+
+        # 6. Splitter cluster auto-configuration
+        splitter_keys = [
+            "dataset_path", "test_sample_per_class", "val_sample_per_class",
+            "save_results", "include_video", "load_video", "load_audio",
+            "split_strategy", "evaluation_mode", "num_folds", "fold_index", "cv_val_ratio", "stratified", "balance_classes"
+        ]
+        splitter_dict = dict(d.get("dataset_splitter", {})) if isinstance(d.get("dataset_splitter"), dict) else {}
+        for k in splitter_keys:
+            if k in d:
+                splitter_dict[k] = d.pop(k)
+        if splitter_dict:
+            d["dataset_splitter"] = splitter_dict
 
         return d
 
@@ -552,7 +565,7 @@ class TrainConfig(BaseModel):
 
     @property
     def head_type(self) -> str:
-        return getattr(self.model, "head_type", "tournament")
+        return getattr(self.model, "head_type", "flat")
 
     @head_type.setter
     def head_type(self, val: str) -> None:

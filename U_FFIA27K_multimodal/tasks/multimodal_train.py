@@ -90,7 +90,7 @@ class MultimodalTrainer:
         self.train_config_path = train_config_path
 
         # Setup Loss
-        head_type = getattr(getattr(self.config, "model", None), "head_type", "tournament")
+        head_type = getattr(getattr(self.config, "model", None), "head_type", "flat")
         loss_type = getattr(self.config, "loss_type", "pairwise_tournament")
         if head_type == "flat" or loss_type not in ("pairwise_tournament",):
             self.loss_fn = ClipCELoss()
@@ -359,12 +359,21 @@ class MultimodalTrainer:
             val_acc_a = float(val_stats.get('acc_audio', 0.0))
 
             lr_current = self.optimizer.param_groups[0]['lr']
-            logger.info(
-                f"Epoch {epoch:03d} [TOURNAMENT E2E]: "
-                f"Train Loss = {train_loss:.5f} | Train Acc Video = {train_acc_v:.4f} | Train Acc Audio = {train_acc_a:.4f} | Train Acc Fusion = {train_acc:.4f} | LR = {lr_current:.2e} | "
-                f"Val Loss = {val_loss:.5f} | Val Acc Video = {val_acc_v:.4f} | Val Acc Audio = {val_acc_a:.4f} | "
-                f"Val Acc Fusion = {val_acc:.4f} | Val QWK = {val_qwk:.4f}"
-            )
+            is_flat = getattr(getattr(self.config, "model", None), "head_type", "flat") == "flat"
+            prefix = "[FLAT FUSION]" if is_flat else "[TOURNAMENT E2E]"
+            if is_flat:
+                logger.info(
+                    f"Epoch {epoch:03d} {prefix}: "
+                    f"Train Loss = {train_loss:.5f} | Train Acc = {train_acc:.4f} | LR = {lr_current:.2e} | "
+                    f"Val Loss = {val_loss:.5f} | Val Acc = {val_acc:.4f} | Val QWK = {val_qwk:.4f}"
+                )
+            else:
+                logger.info(
+                    f"Epoch {epoch:03d} {prefix}: "
+                    f"Train Loss = {train_loss:.5f} | Train Acc Video = {train_acc_v:.4f} | Train Acc Audio = {train_acc_a:.4f} | Train Acc Fusion = {train_acc:.4f} | LR = {lr_current:.2e} | "
+                    f"Val Loss = {val_loss:.5f} | Val Acc Video = {val_acc_v:.4f} | Val Acc Audio = {val_acc_a:.4f} | "
+                    f"Val Acc Fusion = {val_acc:.4f} | Val QWK = {val_qwk:.4f}"
+                )
 
             # Determine if this is the best checkpoint for primary monitor
             is_best = False

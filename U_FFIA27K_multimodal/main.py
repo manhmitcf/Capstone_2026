@@ -63,34 +63,43 @@ def build_model(config: TrainConfig, seed: Optional[int] = None) -> torch.nn.Mod
 
     in_chans = getattr(config, "in_chans", getattr(config.video_features, "num_channels", 6))
 
+    head_type = getattr(config, "head_type", getattr(config.model, "head_type", "flat"))
+    fusion_type = getattr(config, "fusion_type", getattr(config.model, "fusion_type", "gating"))
     tb_cfg = getattr(config.model, "tie_breakers", None)
-    if tb_cfg is not None:
-        if hasattr(tb_cfg, "enable_b12"):
-            b12_str = f"Video={tb_cfg.enable_b12}"
-            b23_str = f"Video={tb_cfg.enable_b23}"
-            b13_str = f"Video={tb_cfg.enable_b13}"
-        elif hasattr(tb_cfg, "b12"):
-            b12_str = f"Video={getattr(tb_cfg.b12, 'enable_video', tb_cfg.b12)}"
-            b23_str = f"Video={getattr(tb_cfg.b23, 'enable_video', tb_cfg.b23)}"
-            b13_str = f"Video={getattr(tb_cfg.b13, 'enable_video', tb_cfg.b13)}"
-        elif isinstance(tb_cfg, dict):
-            b12_val = tb_cfg.get("enable_b12", tb_cfg.get("b12", True))
-            b23_val = tb_cfg.get("enable_b23", tb_cfg.get("b23", True))
-            b13_val = tb_cfg.get("enable_b13", tb_cfg.get("b13", True))
-            b12_str = f"{b12_val}"
-            b23_str = f"{b23_val}"
-            b13_str = f"{b13_val}"
-        else:
-            b12_str = b23_str = b13_str = "Default"
-    else:
-        b12_str = b23_str = b13_str = "All True"
 
-    logger.info(
-        f"Video Tie-Breakers configuration: "
-        f"B12 (Weak vs Med)=[{b12_str}], "
-        f"B23 (Med vs Strong)=[{b23_str}], "
-        f"B13 (Weak vs Strong)=[{b13_str}]"
-    )
+    if head_type == "flat":
+        logger.info(
+            f"Multimodal Fusion Engine: Flat Head [{fusion_type.upper()}] -> {config.model.classes_num} classes "
+            f"(2-Level Tournament & Tie-Breakers bypassed)."
+        )
+    else:
+        if tb_cfg is not None:
+            if hasattr(tb_cfg, "enable_b12"):
+                b12_str = f"Video={tb_cfg.enable_b12}"
+                b23_str = f"Video={tb_cfg.enable_b23}"
+                b13_str = f"Video={tb_cfg.enable_b13}"
+            elif hasattr(tb_cfg, "b12"):
+                b12_str = f"Video={getattr(tb_cfg.b12, 'enable_video', tb_cfg.b12)}"
+                b23_str = f"Video={getattr(tb_cfg.b23, 'enable_video', tb_cfg.b23)}"
+                b13_str = f"Video={getattr(tb_cfg.b13, 'enable_video', tb_cfg.b13)}"
+            elif isinstance(tb_cfg, dict):
+                b12_val = tb_cfg.get("enable_b12", tb_cfg.get("b12", True))
+                b23_val = tb_cfg.get("enable_b23", tb_cfg.get("b23", True))
+                b13_val = tb_cfg.get("enable_b13", tb_cfg.get("b13", True))
+                b12_str = f"{b12_val}"
+                b23_str = f"{b23_val}"
+                b13_str = f"{b13_val}"
+            else:
+                b12_str = b23_str = b13_str = "Default"
+        else:
+            b12_str = b23_str = b13_str = "All True"
+
+        logger.info(
+            f"Video Tie-Breakers configuration: "
+            f"B12 (Weak vs Med)=[{b12_str}], "
+            f"B23 (Med vs Strong)=[{b23_str}], "
+            f"B13 (Weak vs Strong)=[{b13_str}]"
+        )
 
     return model_cls(
         classes_num=config.model.classes_num,
@@ -103,8 +112,8 @@ def build_model(config: TrainConfig, seed: Optional[int] = None) -> torch.nn.Mod
         audio_hidden_dims=getattr(config.model, "audio_hidden_dims", (768, 512)),
         tie_breakers=tb_cfg,
         video_drop_path=getattr(config.model, "video_drop_path", 0.1),
-        fusion_type=getattr(config, "fusion_type", getattr(config.model, "fusion_type", "gating")),
-        head_type=getattr(config, "head_type", getattr(config.model, "head_type", "tournament")),
+        fusion_type=fusion_type,
+        head_type=head_type,
     )
 
 
@@ -168,8 +177,12 @@ def verify_model_dry_run(model: torch.nn.Module, config: TrainConfig, device: to
             raise ValueError(f"Expected output shape (4, 4), got {out['clipwise_output'].shape}")
 
         # 3. Test backward pass & gradient flow
-        loss_type = getattr(config, "loss_type", "pairwise_tournament")
-        if loss_type == "pairwise_tournament":
+        head_type = getattr(config, "head_type", getattr(config.model, "head_type", "flat"))
+        loss_type = getattr(config, "loss_type", "ce")
+        if head_type == "flat" or loss_type not in ("pairwise_tournament",):
+            loss_fn = ClipCELoss()
+            loss = loss_fn(out, {"target": dummy_targets})
+        else:
             loss_fn = PairwiseTournamentLoss(
                 weight_act=getattr(config, "weight_act", 0.5),
                 weight_pairwise=getattr(config, "weight_pairwise", 0.5),
@@ -177,9 +190,6 @@ def verify_model_dry_run(model: torch.nn.Module, config: TrainConfig, device: to
                 aux_loss_weight=getattr(config, "aux_loss_weight", 0.3),
             ).to(device)
             loss = loss_fn(out, {"target": dummy_targets}, epoch=1)
-        else:
-            loss_fn = ClipCELoss()
-            loss = loss_fn(out, {"target": dummy_targets})
         loss.backward()
 
         trainable_with_grads = sum(1 for p in model.parameters() if p.requires_grad and p.grad is not None)
@@ -388,7 +398,7 @@ def upload_artifact_if_enabled(upload_config: ArtifactUploadConfig, config: Trai
     output_zip_path = str(zip_parent / artifact_filename)
     artifact_zip = zip_directory(source_dir, output_zip_path)
 
-    target_branch = getattr(upload_config, "branch", None) or "final"
+    target_branch = getattr(upload_config, "branch", None) or "main"
     if upload_config.create_repo:
         try:
             create_repo(
@@ -419,15 +429,19 @@ def upload_artifact_if_enabled(upload_config: ArtifactUploadConfig, config: Trai
     logger.info(f"Branch:                               '{target_branch}'")
     logger.info("==================================================")
 
-    upload_file(
-        path_or_fileobj=artifact_zip,
-        path_in_repo=artifact_filename,
-        repo_id=upload_config.repo_id,
-        repo_type=upload_config.repo_type,
-        token=token,
-        revision=target_branch,
-    )
-    logger.info("Artifact upload to Hugging Face completed successfully!")
+    try:
+        upload_file(
+            path_or_fileobj=artifact_zip,
+            path_in_repo=artifact_filename,
+            repo_id=upload_config.repo_id,
+            repo_type=upload_config.repo_type,
+            token=token,
+            revision=target_branch,
+        )
+        logger.info("Artifact upload to Hugging Face completed successfully!")
+    except Exception as exc:
+        logger.error(f"Hugging Face artifact upload failed: {exc}")
+        logger.info(f"Local training checkpoints remain completely intact at: '{config.ckpt_dir}'")
 
 
 def run_training_session(
@@ -443,6 +457,9 @@ def run_training_session(
     fusion_type: Optional[str] = None,
     case_name: Optional[str] = None,
     resume: bool = False,
+    epochs: Optional[int] = None,
+    batch_size: Optional[int] = None,
+    learning_rate: Optional[float] = None,
 ) -> None:
     pkg_dir = Path(__file__).resolve().parent
     if train_config_path is None:
@@ -455,6 +472,12 @@ def run_training_session(
         config.fusion_type = fusion_type
     if case_name is not None:
         config.case_name = case_name
+    if epochs is not None:
+        config.epochs = epochs
+    if batch_size is not None:
+        config.batch_size = batch_size
+    if learning_rate is not None:
+        config.learning_rate = learning_rate
     if seed is not None:
         config.seed = seed
         config.dataset_splitter.seed = seed
@@ -478,7 +501,8 @@ def run_training_session(
     logger.info(f"Training device: {device}")
 
     eval_mode = config.dataset_splitter.evaluation_mode
-    model_name = config.model.backbone
+    case_name = getattr(config, "case_name", getattr(config.model, "case_name", None))
+    model_name = case_name if case_name else config.model.backbone
 
     # =========================================================================
     # FAST PRE-FLIGHT DRY-RUN (Verify full network before preloading RAM)
@@ -537,7 +561,7 @@ def run_training_session(
                 device=device,
                 train_config_path=train_config_path
             )
-            trainer.train()
+            trainer.train(resume=resume)
 
         if len(target_folds) == num_folds:
             generate_cv_summary_report(base_dir, num_folds)
@@ -587,6 +611,9 @@ def main() -> None:
     parser.add_argument("--resume", action="store_true", help="Resume training from last_model.pth if available")
     parser.add_argument("--fusion", "-f", type=str, choices=["gating", "sum", "concat"], default=None, help="Flat multimodal fusion type (gating, sum, or concat)")
     parser.add_argument("--case", type=str, choices=["fusion_gating", "fusion_sum", "fusion_concat", "gating", "sum", "concat"], default=None, help="Ablation case name or shorthand")
+    parser.add_argument("--epochs", type=int, default=None, help="Override total training epochs")
+    parser.add_argument("--batch-size", type=int, default=None, help="Override batch size")
+    parser.add_argument("--lr", "--learning-rate", dest="learning_rate", type=float, default=None, help="Override initial learning rate")
     args = parser.parse_args()
 
     run_training_session(
@@ -602,6 +629,9 @@ def main() -> None:
         resume=args.resume,
         fusion_type=args.fusion,
         case_name=args.case,
+        epochs=args.epochs,
+        batch_size=args.batch_size,
+        learning_rate=args.learning_rate,
     )
 
 

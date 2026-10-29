@@ -142,7 +142,10 @@ class MultimodalSOTANet(nn.Module):
 
         # Flat Head Fast-Path
         if self.head_type == "flat":
-            return self.fusion(f_video=f_video, f_audio=f_audio)
+            out = self.fusion(f_video=f_video, f_audio=f_audio)
+            out["f_video"] = f_video
+            out["f_audio"] = f_audio
+            return out
 
         # Auxiliary Unimodal Logits (for standalone evaluation & multi-objective training)
         logits_video = self.aux_head_video(f_video)

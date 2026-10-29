@@ -50,6 +50,7 @@ git pull origin ablations/flat_multimodal_fusion
 cd /marimo/Capstone_2026_Fish_Feeding_Intensity/U_FFIA27K_multimodal
 pip install --upgrade pip
 pip install -r requirements.txt
+pytest tests/test_flat_multimodal_fusion.py -v
 python main.py --dry-run
 pkill -f "python main.py" || true
 nohup python main.py > main.log 2>&1 &
