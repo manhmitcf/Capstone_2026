@@ -133,6 +133,12 @@ class ModelConfig(BaseModel):
         default="sigmoid",
         description="Gate activation function: 'sigmoid' (independent gating) or 'softmax' (convex combination)."
     )
+    classifier_dropout: float = Field(
+        default=0.1,
+        ge=0.0,
+        le=0.8,
+        description="Dropout rate applied right before the flat classifier linear layer."
+    )
     case_name: Optional[str] = Field(
         default=None,
         description="Case identifier for experiment tracking (e.g. fusion_gating)."
@@ -355,6 +361,8 @@ class TrainConfig(BaseModel):
 
         if 'gate_activation' in d:
             model_dict['gate_activation'] = d.pop('gate_activation')
+        if 'classifier_dropout' in d:
+            model_dict['classifier_dropout'] = d.pop('classifier_dropout')
         model_dict.setdefault('head_type', 'flat')
         d['model'] = model_dict
 
@@ -584,6 +592,14 @@ class TrainConfig(BaseModel):
     @gate_activation.setter
     def gate_activation(self, val: str) -> None:
         self.model.gate_activation = str(val).strip().lower()
+
+    @property
+    def classifier_dropout(self) -> float:
+        return getattr(self.model, "classifier_dropout", 0.1)
+
+    @classifier_dropout.setter
+    def classifier_dropout(self, val: float) -> None:
+        self.model.classifier_dropout = float(val)
 
     @property
     def case_name(self) -> str:

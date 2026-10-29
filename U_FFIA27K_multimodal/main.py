@@ -66,12 +66,14 @@ def build_model(config: TrainConfig, seed: Optional[int] = None) -> torch.nn.Mod
     head_type = getattr(config, "head_type", getattr(config.model, "head_type", "flat"))
     fusion_type = getattr(config, "fusion_type", getattr(config.model, "fusion_type", "gating"))
     gate_activation = getattr(config.model, "gate_activation", getattr(config, "gate_activation", "sigmoid"))
+    classifier_dropout = getattr(config.model, "classifier_dropout", getattr(config, "classifier_dropout", 0.1))
     tb_cfg = getattr(config.model, "tie_breakers", None)
 
     if head_type == "flat":
-        gate_info = f" (Gate Activation: {gate_activation})" if fusion_type == "gating" else ""
+        gate_info = f" (Gate: {gate_activation})" if fusion_type == "gating" else ""
+        drop_info = f" [Dropout: {classifier_dropout}]"
         logger.info(
-            f"Multimodal Fusion Engine: Flat Head [{fusion_type.upper()}]{gate_info} -> {config.model.classes_num} classes "
+            f"Multimodal Fusion Engine: Flat Head [{fusion_type.upper()}]{gate_info}{drop_info} -> {config.model.classes_num} classes "
             f"(2-Level Tournament & Tie-Breakers bypassed)."
         )
     else:
@@ -117,6 +119,7 @@ def build_model(config: TrainConfig, seed: Optional[int] = None) -> torch.nn.Mod
         fusion_type=fusion_type,
         head_type=head_type,
         gate_activation=gate_activation,
+        classifier_dropout=classifier_dropout,
     )
 
 
@@ -459,6 +462,7 @@ def run_training_session(
     eta_min: Optional[float] = None,
     fusion_type: Optional[str] = None,
     gate_activation: Optional[str] = None,
+    classifier_dropout: Optional[float] = None,
     case_name: Optional[str] = None,
     resume: bool = False,
     epochs: Optional[int] = None,
@@ -476,6 +480,8 @@ def run_training_session(
         config.fusion_type = fusion_type
     if gate_activation is not None:
         config.gate_activation = gate_activation
+    if classifier_dropout is not None:
+        config.classifier_dropout = classifier_dropout
     if case_name is not None:
         config.case_name = case_name
     if epochs is not None:
@@ -617,6 +623,7 @@ def main() -> None:
     parser.add_argument("--resume", action="store_true", help="Resume training from last_model.pth if available")
     parser.add_argument("--fusion", "-f", type=str, choices=["gating", "sum", "concat"], default=None, help="Flat multimodal fusion type (gating, sum, or concat)")
     parser.add_argument("--gate-activation", type=str, choices=["sigmoid", "softmax"], default=None, help="Gate activation function ('sigmoid' or 'softmax')")
+    parser.add_argument("--classifier-dropout", "--dropout", dest="classifier_dropout", type=float, default=None, help="Dropout probability before flat classifier linear layer")
     parser.add_argument("--case", type=str, choices=["fusion_gating", "fusion_sum", "fusion_concat", "gating", "sum", "concat"], default=None, help="Ablation case name or shorthand")
     parser.add_argument("--epochs", type=int, default=None, help="Override total training epochs")
     parser.add_argument("--batch-size", type=int, default=None, help="Override batch size")
@@ -636,6 +643,7 @@ def main() -> None:
         resume=args.resume,
         fusion_type=args.fusion,
         gate_activation=args.gate_activation,
+        classifier_dropout=args.classifier_dropout,
         case_name=args.case,
         epochs=args.epochs,
         batch_size=args.batch_size,

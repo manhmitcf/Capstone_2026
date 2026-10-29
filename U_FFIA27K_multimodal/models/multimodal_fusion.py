@@ -313,10 +313,14 @@ class MultimodalTournamentFusion(nn.Module):
         fusion_type: str = "gating",
         head_type: str = "tournament",
         gate_activation: str = "sigmoid",
+        classifier_dropout: float = 0.1,
         **kwargs
     ) -> None:
         super().__init__()
-        kwargs.pop("dropout", None)
+        cdrop = kwargs.pop("classifier_dropout", None)
+        if cdrop is None:
+            cdrop = kwargs.pop("dropout", classifier_dropout)
+        self.classifier_dropout = float(cdrop if cdrop is not None else 0.1)
 
         self.dim = dim
         self.classes_num = classes_num
@@ -325,6 +329,7 @@ class MultimodalTournamentFusion(nn.Module):
         self.gate_activation = str(kwargs.get("gate_activation", gate_activation)).strip().lower()
 
         if self.head_type == "flat":
+            self.dropout = nn.Dropout(p=self.classifier_dropout)
             if self.fusion_type == "gating":
                 if self.gate_activation == "softmax":
                     gate_act_layer = nn.Softmax(dim=-1)
@@ -387,7 +392,7 @@ class MultimodalTournamentFusion(nn.Module):
                 w_video = weights[:, 0:1]
                 w_audio = weights[:, 1:2]
                 f_fused = self.norm_fused(w_video * f_video + w_audio * f_audio)
-                logits = self.classifier(f_fused)
+                logits = self.classifier(self.dropout(f_fused))
                 return {
                     "logits": logits,
                     "clipwise_output": logits,
@@ -397,7 +402,7 @@ class MultimodalTournamentFusion(nn.Module):
                 }
             elif self.fusion_type == "sum":
                 f_fused = self.norm_fused(f_video + f_audio)
-                logits = self.classifier(f_fused)
+                logits = self.classifier(self.dropout(f_fused))
                 return {
                     "logits": logits,
                     "clipwise_output": logits,
@@ -406,7 +411,7 @@ class MultimodalTournamentFusion(nn.Module):
             elif self.fusion_type == "concat":
                 combined = torch.cat([f_video, f_audio], dim=-1)
                 f_fused = self.norm_fused(combined)
-                logits = self.classifier(f_fused)
+                logits = self.classifier(self.dropout(f_fused))
                 return {
                     "logits": logits,
                     "clipwise_output": logits,

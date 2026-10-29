@@ -28,6 +28,7 @@
     "backbone": "MultimodalSOTANet",
     "fusion_type": "gating",
     "gate_activation": "sigmoid",
+    "classifier_dropout": 0.1,
     "classes_num": 4,
     "embed_dim": 384,
     "audio_hidden_dims": [
