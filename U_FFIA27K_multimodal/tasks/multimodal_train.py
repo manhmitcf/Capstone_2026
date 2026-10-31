@@ -654,12 +654,16 @@ class MultimodalTrainer:
         logger.info("Profiling model Parameters, FLOPs, and Inference Latency...")
         param_stats = count_parameters(self.model)
         total_params_m = float(param_stats.get('total_million', 0.0))
+        vf = getattr(self.config, "video_features", None)
+        num_frames = getattr(vf, "num_frames", getattr(self.config, "num_frames", 2))
+        image_size = getattr(vf, "image_size", getattr(self.config, "image_size", 224))
+
         try:
             device_str = self.device.type
             gflops = measure_flops(
                 self.model,
                 device=device_str,
-                num_frames=getattr(self.config, "num_frames", 2)
+                num_frames=num_frames
             )
             logger.info(f"Model Parameters: {total_params_m:.3f} M | Complexity: {gflops:.4f} GFLOPs")
         except Exception as exc:
@@ -668,7 +672,7 @@ class MultimodalTrainer:
 
         try:
             inference_latency_ms = self.timer.measure_latency_per_sample(
-                video_shape=(1, getattr(self.config, "num_frames", 2), 3, getattr(self.config, "image_size", 224), getattr(self.config, "image_size", 224)),
+                video_shape=(1, num_frames, 3, image_size, image_size),
                 audio_shape=(1, 512000)
             )
         except Exception as exc:

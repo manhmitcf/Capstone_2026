@@ -6,18 +6,16 @@ from typing import Tuple
 def drop_path(x: torch.Tensor, drop_prob: float = 0.0, training: bool = False) -> torch.Tensor:
     """
     Drop paths (Stochastic Depth) per sample (when applied in main path of residual blocks).
-    Guarantees active gradient propagation on small batch sizes by ensuring at least one sample is kept.
+    Non-blocking Bernoulli implementation avoiding GPU-to-CPU synchronization stalls.
     """
     if drop_prob == 0.0 or not training:
         return x
     keep_prob = 1.0 - drop_prob
     shape = (x.shape[0],) + (1,) * (x.ndim - 1)
-    random_tensor = keep_prob + torch.rand(shape, dtype=x.dtype, device=x.device)
-    random_tensor.floor_()  # binarize to 0 or 1
-    if random_tensor.sum() == 0:
-        random_tensor[0] = 1.0
-    output = x.div(keep_prob) * random_tensor
-    return output
+    random_tensor = x.new_empty(shape).bernoulli_(keep_prob)
+    if keep_prob > 0.0:
+        random_tensor.div_(keep_prob)
+    return x * random_tensor
 
 
 class DropPath(nn.Module):
@@ -90,7 +88,7 @@ class ConvNeXtNanoVideoBackbone(nn.Module):
       - Stage 4: 384ch x 1 block  (DropPath linear schedule)
       - Temporal Aggregation (composite_ln default): LN((v0 + v1) + |v1 - v0|)
       - Native 384-dim: Direct 384-dimensional representation preserving full channel capacity.
-      - Total parameters: 2,614,176 params (~2.614M).
+      - Total parameters: 2,614,176 params (composite_ln) / 2,613,408 params (sum, abs_diff).
     """
     def __init__(
         self,
@@ -100,7 +98,7 @@ class ConvNeXtNanoVideoBackbone(nn.Module):
         depths: Tuple[int, ...] = (1, 1, 3, 1),
         num_frames: int = 2,
         drop_path_rate: float = 0.1,
-        temporal_mode: str = "composite_ln",
+        temporal_mode: str = "sum",
         **kwargs
     ) -> None:
         super().__init__()

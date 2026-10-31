@@ -22,22 +22,26 @@ class MultimodalSOTANet(nn.Module):
       2. Acoustic Time-Frequency Stream (~2.173M params):
          High-Resolution TKEO-STFT Audio Frontend (256 kHz, 2049 linear bins, 4,098 params)
          + 2-hidden-layer AudioMLPBackbone (2049 -> 768 -> 512 -> 384, 2,168,448 params).
-      3. Pairwise Tournament Fusion (~0.374M params with B23 enabled):
-         - Direct Cross-Modal Reliability Gating: [w_V, w_A] = softmax(W[f_V || f_A]).
-           f_fused = LayerNorm(w_V * f_V + w_A * f_A) -> Directly fed into Tournament Head.
-         - Level 1: Feeding Activity Gating Head (None vs Active Feeding, unified 192-dim).
+      3. Pairwise Tournament Fusion (~0.003M params with B23 enabled, Linear 384->1):
+         - Direct Sum + LayerNorm: f_fused = LayerNorm(f_V + f_A) -> Directly fed into Tournament Head.
+         - Level 1: Feeding Activity Gating Head (None vs Active Feeding, Linear 384->1).
          - Level 2: 3 Specialized Pairwise Subspace Heads on f_fused
              with Configurable Video Kinematics Referees on f_video (B12, B23, B13).
-         - Dynamic Tie-Breaker Intervention (Sigmoid Reparameterization): logit = logit_base + gamma_eff * u_tie * logit_video.
+         - Dynamic Tie-Breaker Intervention: logit = logit_base + u_tie * logit_video.
          - Tournament Borda Voting to derive final calibrated multi-class probabilities.
       4. Auxiliary Unimodal Classifier Heads (3,080 params):
          - Video Aux Head: Linear(384, 4)
          - Audio Aux Head: Linear(384, 4)
 
     Total Parameters:
-      - Default (B23 enabled): 5,164,594 (~5.165M) | 121 parameter tensors.
-      - All 3 Referees enabled: 5,313,590 (~5.314M) | 135 parameter tensors.
-      - Pure Baseline (0 Referees): 5,090,096 (~5.090M) | 114 parameter tensors.
+      - Temporal Mode 'sum' (Default in train_config.json):
+          * Default (B23 enabled): 4,791,727 (~4.792M) | 96 parameter tensors.
+          * All 3 Referees enabled: 4,792,497 (~4.792M) | 100 parameter tensors.
+          * Pure Baseline (0 Referees): 4,791,342 (~4.791M) | 94 parameter tensors.
+      - Temporal Mode 'composite_ln':
+          * Default (B23 enabled): 4,792,495 (~4.792M) | 98 parameter tensors.
+          * All 3 Referees enabled: 4,793,265 (~4.793M) | 102 parameter tensors.
+          * Pure Baseline (0 Referees): 4,792,110 (~4.792M) | 96 parameter tensors.
     """
     model_name: str = "MultimodalSOTANet"
 
@@ -49,9 +53,10 @@ class MultimodalSOTANet(nn.Module):
         image_size: int = 224,
         num_frames: int = 2,
         in_chans: int = 6,
-        temporal_mode: str = "composite_ln",
+        temporal_mode: str = "sum",
         audio_hidden_dims: Tuple[int, ...] = (768, 512),
         tie_breakers: Optional[Any] = None,
+        tournament: Optional[Any] = None,
         video_drop_path: float = 0.1,
         **kwargs
     ) -> None:
@@ -64,6 +69,7 @@ class MultimodalSOTANet(nn.Module):
         self.temporal_mode = temporal_mode
         self.audio_hidden_dims = audio_hidden_dims
         self.tie_breakers = tie_breakers
+        self.tournament = tournament
         self.video_drop_path = video_drop_path
 
         # 1. Frontends
@@ -85,10 +91,11 @@ class MultimodalSOTANet(nn.Module):
             dropout=0.1,
         )
 
-        # 3. Multimodal Tournament Fusion (Direct Gated, 384-dim)
+        # 3. Multimodal Tournament Fusion (Direct Sum + LayerNorm, 384-dim)
         self.fusion = MultimodalTournamentFusion(
             dim=embed_dim,
             tie_breakers=tie_breakers,
+            tournament=tournament,
             **kwargs
         )
 
@@ -134,7 +141,7 @@ class MultimodalSOTANet(nn.Module):
         logits_video = self.aux_head_video(f_video)
         logits_audio = self.aux_head_audio(f_audio)
 
-        # Step 3: Direct Gated Multimodal Tournament Fusion with Video Tie-Breakers
+        # Step 3: Direct Sum + LayerNorm Multimodal Tournament Fusion with Video Tie-Breakers
         fusion_outputs = self.fusion(
             f_video=f_video,
             f_audio=f_audio
@@ -146,8 +153,6 @@ class MultimodalSOTANet(nn.Module):
             "logits_video": logits_video,
             "logits_audio": logits_audio,
         }
-        if "logits" not in outputs and "clipwise_output" in outputs:
-            outputs["logits"] = outputs["clipwise_output"]
 
         # Filter out None values to maintain clean output dictionary
         return {k: v for k, v in outputs.items() if v is not None}

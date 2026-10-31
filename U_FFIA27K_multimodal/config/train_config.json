@@ -1,6 +1,5 @@
 {
   "system": {
-    "seed": 42,
     "cache_mode": "ram",
     "dataloader_workers": 8,
     "persistent_workers": true,
@@ -8,7 +7,7 @@
     "ckpt_dir": "checkpoint"
   },
   "training": {
-    "epochs": 400,
+    "epochs": 350,
     "batch_size": 32,
     "learning_rate": 0.001,
     "weight_decay": 0.05,
@@ -39,8 +38,13 @@
     "video_drop_path": 0.1,
     "tie_breakers": {
       "enable_b12": false,
-      "enable_b23": false,
+      "enable_b23": true,
       "enable_b13": false
+    },
+    "tournament": {
+      "tie_temperature": 1.0,
+      "voting_temperature": 1.0,
+      "head_hidden_dims": []
     }
   },
   "video_features": {

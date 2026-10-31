@@ -31,19 +31,18 @@ class FishMotionKinematics6Ch(nn.Module):
         self.register_buffer("sobel_x", sobel_x)
         self.register_buffer("sobel_y", sobel_y)
 
+        # Persistent normalization buffers for physics calculations
+        self.register_buffer("rgb_mean", torch.tensor([0.485, 0.456, 0.406], dtype=torch.float32).view(1, 3, 1, 1))
+        self.register_buffer("rgb_std", torch.tensor([0.229, 0.224, 0.225], dtype=torch.float32).view(1, 3, 1, 1))
+
     def forward(self, frames_rgb: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         B, T, _, H, W = frames_rgb.shape
         device = frames_rgb.device
         dtype = frames_rgb.dtype
 
-        # Unnormalize ImageNet normalization to [0, 1] for physics calculations
+        # Unnormalize ImageNet normalization to [0, 1] for physics calculations without CPU-GPU sync
         rgb_flat = frames_rgb.view(B * T, 3, H, W)
-        if rgb_flat.min() < 0.0:
-            mean = torch.tensor([0.485, 0.456, 0.406], device=device, dtype=dtype).view(1, 3, 1, 1)
-            std = torch.tensor([0.229, 0.224, 0.225], device=device, dtype=dtype).view(1, 3, 1, 1)
-            rgb_01 = torch.clamp(rgb_flat * std + mean, 0.0, 1.0)
-        else:
-            rgb_01 = torch.clamp(rgb_flat, 0.0, 1.0)
+        rgb_01 = torch.clamp(rgb_flat * self.rgb_std + self.rgb_mean, 0.0, 1.0)
 
         sobel_x = self.sobel_x.to(device=device, dtype=dtype)
         sobel_y = self.sobel_y.to(device=device, dtype=dtype)

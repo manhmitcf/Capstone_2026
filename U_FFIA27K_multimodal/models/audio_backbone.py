@@ -8,7 +8,7 @@ def init_layer(layer: nn.Module) -> None:
     if hasattr(layer, 'weight') and layer.weight is not None:
         nn.init.xavier_uniform_(layer.weight)
     if hasattr(layer, 'bias') and layer.bias is not None:
-        layer.bias.data.fill_(0.)
+        nn.init.zeros_(layer.bias)
 
 
 class AudioMLPBackbone(nn.Module):

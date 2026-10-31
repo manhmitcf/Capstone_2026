@@ -23,7 +23,7 @@ class ClipCELoss(BaseLoss):
         targets = target_dict['target']
         if targets.ndim > 1 and targets.size(-1) > 1:
             return F.cross_entropy(logits, targets)
-        return F.cross_entropy(logits, targets.long())
+        return F.cross_entropy(logits, targets.long().view(-1))
 
 
 class PairwiseTournamentLoss(BaseLoss):

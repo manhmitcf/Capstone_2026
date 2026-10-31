@@ -1,3 +1,4 @@
+from typing import Optional
 import os
 import random
 import logging
@@ -7,11 +8,14 @@ import torch
 logger = logging.getLogger(__name__)
 
 
-def seed_everything(seed: int = 42) -> int:
+def seed_everything(seed: Optional[int] = None) -> Optional[int]:
     """
     Set random seeds for full deterministic reproducibility across:
     Python random module, OS hash seed, NumPy, and PyTorch (CPU & CUDA).
+    If seed is None, does nothing and returns None.
     """
+    if seed is None:
+        return None
     seed = int(seed)
     random.seed(seed)
     os.environ['PYTHONHASHSEED'] = str(seed)

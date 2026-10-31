@@ -27,7 +27,7 @@ class VideoFeaturesConfig(BaseModel):
     image_size: int = Field(default=224, description="Target spatial resolution H=W.")
     num_frames: int = Field(default=2, description="Number of uniform frames sampled per video clip (T=2).")
     num_channels: int = Field(default=6, description="6-channel representation (RGB + 2 Differentiable Optical Flow: u, v + Fluid Vorticity: omega).")
-    temporal_mode: str = Field(default="composite_ln", description="Temporal aggregation mode: 'composite_ln', 'sum', or 'abs_diff'.")
+    temporal_mode: Literal["composite_ln", "sum", "abs_diff"] = Field(default="sum", description="Temporal aggregation mode: 'composite_ln', 'sum', or 'abs_diff'.")
 
 
 class AudioFeaturesConfig(BaseModel):
@@ -108,13 +108,33 @@ class VideoTieBreakersConfig(BaseModel):
         return self.enable_b13
 
 
+class TournamentConfig(BaseModel):
+    """
+    Configuration parameters for Tournament Decision Head.
+    """
+    tie_temperature: float = Field(
+        default=1.0,
+        gt=0.0,
+        description="Temperature scaling for tie-breaker uncertainty: u_tie = exp(-|logit_base| / tie_temperature)."
+    )
+    voting_temperature: float = Field(
+        default=1.0,
+        gt=0.0,
+        description="Temperature scaling for Borda voting softmax: softmax(v_voting * voting_temperature)."
+    )
+    head_hidden_dims: Tuple[int, ...] = Field(
+        default=(),
+        description="Hidden layer dimensions for Level 1 & Level 2 subspace heads. Default () projects directly Linear(dim -> 1)."
+    )
+
+
 class ModelConfig(BaseModel):
     """
-    Configuration for Multimodal Tournament Model with Video Kinematics Tie-Breakers (~5.16M parameters).
+    Configuration for Multimodal Tournament Model with Video Kinematics Tie-Breakers (~4.792M parameters).
     Video: ConvNeXt-Nano (6-ch Kinematics, composite_ln) ~2.614M
     Audio: TKEO-STFT-MLP (2049 -> 768 -> 512 -> 384) ~2.168M
     Audio Frontend: TKEO-STFT LayerNorm ~0.004M
-    Fusion: Direct Gated Tournament Decision Head with Video Referees ~0.374M (B23)
+    Fusion: Direct Sum Tournament Decision Head with Video Referees ~0.003M (B23, Linear 384->1)
     Auxiliary Heads: Video + Audio Aux Heads ~0.003M
     """
     backbone: str = Field(
@@ -136,6 +156,10 @@ class ModelConfig(BaseModel):
     tie_breakers: VideoTieBreakersConfig = Field(
         default_factory=VideoTieBreakersConfig,
         description="Pairwise Video Kinematics Referee configurations for B12, B23, B13."
+    )
+    tournament: TournamentConfig = Field(
+        default_factory=TournamentConfig,
+        description="Tournament decision head hyperparameters (temperatures and hidden dimensions)."
     )
 
 
@@ -194,7 +218,7 @@ class SystemConfig(BaseModel):
     """
     Runtime system, caching, device workers, and storage configuration.
     """
-    seed: int = Field(default=42, ge=0, description="Master random seed.")
+    seed: Optional[int] = Field(default=None, ge=0, description="Master random seed. None disables deterministic system seeding.")
     cache_mode: str = Field(default="ram", description="Caching mode: 'ram', 'disk', or 'none'.")
     dataloader_workers: int = Field(default=8, description="Number of worker processes for DataLoader (Fixed to 8).")
     persistent_workers: bool = Field(default=True, description="Whether to maintain worker processes alive across epochs.")
@@ -206,11 +230,11 @@ class TrainingConfig(BaseModel):
     """
     Optimization hyperparameters and scheduler configuration.
     """
-    epochs: int = Field(default=200, gt=0, description="Total number of training epochs.")
+    epochs: int = Field(default=350, gt=0, description="Total number of training epochs.")
     batch_size: int = Field(default=32, gt=0, description="Training batch size.")
     learning_rate: float = Field(default=1e-3, gt=0, description="Initial learning rate.")
-    min_lr: float = Field(default=1e-5, ge=0.0, description="Minimum learning rate for CosineAnnealingLR.")
     eta_min: float = Field(default=1e-6, ge=0.0, description="Minimum learning rate for CosineAnnealingLR.")
+    min_lr: Optional[float] = Field(default=None, ge=0.0, description="Deprecated alias for eta_min.")
     weight_decay: float = Field(default=0.05, ge=0, description="Weight decay factor for AdamW.")
     use_onecycle: Optional[bool] = Field(default=None, description="Legacy flag for OneCycleLR.")
     lr_scheduler: str = Field(
@@ -314,9 +338,9 @@ class TrainConfig(BaseModel):
     # Backward-compatible property getters & setters for seamless flat access
     # -------------------------------------------------------------------------
     @property
-    def seed(self) -> int: return self.system.seed
+    def seed(self) -> Optional[int]: return self.system.seed
     @seed.setter
-    def seed(self, val: int) -> None: self.system.seed = val
+    def seed(self, val: Optional[int]) -> None: self.system.seed = val
 
     @property
     def cache_mode(self) -> str: return self.system.cache_mode
@@ -359,9 +383,11 @@ class TrainConfig(BaseModel):
     def learning_rate(self, val: float) -> None: self.training.learning_rate = val
 
     @property
-    def min_lr(self) -> float: return self.training.min_lr
+    def min_lr(self) -> float: return getattr(self.training, "eta_min", 1e-6)
     @min_lr.setter
-    def min_lr(self, val: float) -> None: self.training.min_lr = val
+    def min_lr(self, val: float) -> None:
+        self.training.eta_min = val
+        self.training.min_lr = val
 
     @property
     def eta_min(self) -> float: return getattr(self.training, "eta_min", 1e-6)

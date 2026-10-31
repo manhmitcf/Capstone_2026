@@ -58,8 +58,9 @@ def build_model(config: TrainConfig, seed: Optional[int] = None) -> torch.nn.Mod
     model_cls = MODEL_REGISTRY[config.model.backbone]
     frontend = AudioFrontend(config.audio_features)
 
-    active_seed = seed if seed is not None else int(getattr(config, "seed", getattr(config.dataset_splitter, "seed", 42)))
-    seed_everything(active_seed)
+    effective_seed = seed if seed is not None else getattr(config.system, "seed", None)
+    if effective_seed is not None:
+        seed_everything(effective_seed)
 
     in_chans = getattr(config, "in_chans", getattr(config.video_features, "num_channels", 6))
 
@@ -102,6 +103,7 @@ def build_model(config: TrainConfig, seed: Optional[int] = None) -> torch.nn.Mod
         temporal_mode=getattr(config.video_features, "temporal_mode", "composite_ln"),
         audio_hidden_dims=getattr(config.model, "audio_hidden_dims", (768, 512)),
         tie_breakers=tb_cfg,
+        tournament=getattr(config.model, "tournament", None),
         video_drop_path=getattr(config.model, "video_drop_path", 0.1),
     )
 
@@ -112,7 +114,7 @@ def verify_model_dry_run(model: torch.nn.Module, config: TrainConfig, device: to
     BEFORE loading the dataset into RAM or starting training.
 
     Validates:
-      1. Model parameter audit (~5.16M params).
+      1. Model parameter audit (~4.79M params).
       2. Device placement of all submodules, weights, and buffer filters.
       3. Forward pass with multi-frame 6-ch kinematics extraction and 2049 STFT bins.
       4. Backward pass & gradient propagation through all trainable parameters.
@@ -128,9 +130,12 @@ def verify_model_dry_run(model: torch.nn.Module, config: TrainConfig, device: to
     try:
         # 1. Parameter audit
         stats = count_parameters(model)
-        logger.info(f"  - Video Backbone (ConvNeXt-Nano 6-ch, composite_ln): {stats['video_backbone']:,} ({stats['video_backbone']/1e6:.3f} M)")
+        t_mode = getattr(config.video_features, "temporal_mode", "composite_ln")
+        logger.info(f"  - Video Backbone (ConvNeXt-Nano 6-ch, {t_mode}): {stats['video_backbone']:,} ({stats['video_backbone']/1e6:.3f} M)")
         logger.info(f"  - Audio Backbone (TKEO-STFT-MLP [768, 512] -> 384) : {stats['audio_backbone']:,} ({stats['audio_backbone']/1e6:.3f} M)")
-        logger.info(f"  - Tournament Fusion (Direct Gated, 192-ch Heads)   : {stats['fusion']:,} ({stats['fusion']/1e6:.3f} M)")
+        h_dims = getattr(getattr(config.model, "tournament", None), "head_hidden_dims", ())
+        h_desc = f"{h_dims}-ch" if h_dims else "Linear 384->1"
+        logger.info(f"  - Tournament Fusion (Direct Sum, {h_desc} Heads) : {stats['fusion']:,} ({stats['fusion']/1e6:.3f} M)")
         logger.info(f"  * Total Architecture Parameters:                     {stats['core_total']:,} ({stats['core_total']/1e6:.3f} M)")
         logger.info(f"  * Total Trainable Parameters:                        {stats['total']:,} ({stats['total_million']:.3f} M) [Limit 5M dropped]")
 
@@ -406,9 +411,10 @@ def upload_artifact_if_enabled(upload_config: ArtifactUploadConfig, config: Trai
     logger.info("==================================================")
 
     try:
+        target_path_in_repo = getattr(upload_config, "path_in_repo", None) or artifact_filename
         upload_file(
             path_or_fileobj=artifact_zip,
-            path_in_repo=artifact_filename,
+            path_in_repo=target_path_in_repo,
             repo_id=upload_config.repo_id,
             repo_type=upload_config.repo_type,
             token=token,
@@ -438,9 +444,20 @@ def run_training_session(
         artifact_upload_config_path = str(pkg_dir / "config" / "artifact_upload_config.json")
 
     config = TrainConfig.from_json(train_config_path)
-    if seed is not None:
-        config.seed = seed
-        config.dataset_splitter.seed = seed
+    effective_system_seed = seed if seed is not None else getattr(config.system, "seed", None)
+    if effective_system_seed is not None:
+        config.system.seed = effective_system_seed
+        seed_everything(effective_system_seed)
+        logger.info(
+            f"System deterministic seeding enabled: {effective_system_seed} "
+            f"(Dataset splitter seed strictly preserved: {config.dataset_splitter.seed})."
+        )
+    else:
+        logger.info(
+            f"Dataset splitter seed strictly preserved: {config.dataset_splitter.seed}. "
+            "System deterministic seeding disabled (stochastic model weights & augmentations enabled)."
+        )
+
     if evaluation_mode is not None:
         config.dataset_splitter.evaluation_mode = evaluation_mode
     if fold_index is not None:
@@ -449,10 +466,6 @@ def run_training_session(
         config.lr_scheduler = lr_scheduler
     if eta_min is not None:
         config.eta_min = eta_min
-
-    # Lock deterministic master seed across PyTorch, CUDA, NumPy, Random
-    active_seed = int(getattr(config, "seed", getattr(config.dataset_splitter, "seed", 42)))
-    seed_everything(active_seed)
 
     if device_str is not None:
         device = torch.device(device_str)
@@ -466,7 +479,7 @@ def run_training_session(
     # =========================================================================
     # FAST PRE-FLIGHT DRY-RUN (Verify full network before preloading RAM)
     # =========================================================================
-    preflight_model = build_model(config, seed=active_seed).to(device)
+    preflight_model = build_model(config, seed=seed).to(device)
     verify_model_dry_run(preflight_model, config, device)
 
     if dry_run:
@@ -490,8 +503,9 @@ def run_training_session(
 
         for fold_idx in target_folds:
             logger.info(f"===== RUNNING FOLD {fold_idx + 1}/{num_folds} =====")
-            fold_seed = active_seed + fold_idx
-            seed_everything(fold_seed)
+            fold_seed = seed + fold_idx if seed is not None else None
+            if fold_seed is not None:
+                seed_everything(fold_seed)
 
             fold_config = copy.deepcopy(config)
             fold_config.dataset_splitter.fold_index = fold_idx
@@ -500,6 +514,7 @@ def run_training_session(
                 batch_size=fold_config.batch_size,
                 dataloader_workers=fold_config.dataloader_workers,
                 prefetch_factor=getattr(fold_config, "prefetch_factor", 2),
+                persistent_workers=getattr(fold_config, "persistent_workers", True),
                 cache_mode=fold_config.cache_mode,
                 image_size=fold_config.image_size,
                 num_frames=fold_config.num_frames,
@@ -530,6 +545,7 @@ def run_training_session(
             batch_size=config.batch_size,
             dataloader_workers=config.dataloader_workers,
             prefetch_factor=getattr(config, "prefetch_factor", 2),
+            persistent_workers=getattr(config, "persistent_workers", True),
             cache_mode=config.cache_mode,
             image_size=config.image_size,
             num_frames=config.num_frames,
@@ -562,7 +578,7 @@ def main() -> None:
     parser.add_argument("--upload-config", type=str, default=None, help="Path to artifact_upload_config.json")
     parser.add_argument("--device", type=str, default=None, help="Target compute device (cuda or cpu)")
     parser.add_argument("--dry-run", action="store_true", help="Run pre-flight check only without training")
-    parser.add_argument("--seed", type=int, default=None, help="Master random seed for reproducibility (default: 42 from config)")
+    parser.add_argument("--seed", type=int, default=None, help="Master random seed for reproducibility (default: None, stochastic initialization)")
     parser.add_argument("--evaluation-mode", type=str, choices=["holdout", "cross_validation"], default=None, help="Override evaluation mode (holdout or cross_validation)")
     parser.add_argument("--fold-index", type=int, default=None, help="Specific CV fold index to run (0 to num_folds - 1)")
     parser.add_argument("--lr-scheduler", type=str, choices=["onecycle", "cosine", "constant", "fixed", "none"], default=None, help="Override learning rate scheduler")

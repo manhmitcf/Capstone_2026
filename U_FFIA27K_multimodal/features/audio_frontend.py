@@ -53,14 +53,13 @@ class Spectral1DAugmentation(nn.Module):
         # 1. 1D Frequency Cutout (Vectorized 2D mask on GPU, zero Python loop, zero device sync)
         if self.cutout_width > 0 and self.cutout_prob > 0.0 and F > self.cutout_width:
             mask_decisions = (torch.rand(B, 1, device=out.device) < self.cutout_prob)
-            if mask_decisions.any():
-                start_indices = torch.randint(
-                    0, F - self.cutout_width, (B, 1), device=out.device
-                )
-                freq_indices = torch.arange(F, device=out.device).unsqueeze(0)  # [1, F]
-                cutout_mask = (freq_indices >= start_indices) & (freq_indices < start_indices + self.cutout_width) & mask_decisions
-                min_vals = out.min(dim=-1, keepdim=True)[0]
-                out = torch.where(cutout_mask, min_vals, out)
+            start_indices = torch.randint(
+                0, F - self.cutout_width, (B, 1), device=out.device
+            )
+            freq_indices = torch.arange(F, device=out.device).unsqueeze(0)  # [1, F]
+            cutout_mask = (freq_indices >= start_indices) & (freq_indices < start_indices + self.cutout_width) & mask_decisions
+            min_vals = out.min(dim=-1, keepdim=True)[0]
+            out = torch.where(cutout_mask, min_vals, out)
 
         # 2. Gaussian Spectral Jitter
         if self.noise_std > 0.0:
