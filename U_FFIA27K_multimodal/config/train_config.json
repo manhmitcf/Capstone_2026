@@ -1,7 +1,7 @@
 {
   "system": {
     "cache_mode": "ram",
-    "dataloader_workers": 8,
+    "dataloader_workers": 5,
     "persistent_workers": true,
     "prefetch_factor": 2,
     "ckpt_dir": "checkpoint"
