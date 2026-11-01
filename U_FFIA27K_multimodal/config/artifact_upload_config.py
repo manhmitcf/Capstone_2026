@@ -1,5 +1,6 @@
 import json
 import logging
+from typing import Optional
 from pydantic import BaseModel, Field
 
 
@@ -19,8 +20,8 @@ class ArtifactUploadConfig(BaseModel):
         description="Directory to zip after training completes."
     )
     zip_path: str = Field(
-        default="/marimo/Results_final.zip",
-        description="Path of the zip file to create."
+        default="/marimo",
+        description="Destination parent directory or template path for the zip file."
     )
     repo_id: str = Field(
         default="manhmitcf/final",
@@ -30,9 +31,9 @@ class ArtifactUploadConfig(BaseModel):
         default="dataset",
         description="Hugging Face repository type: 'dataset', 'model', or 'space'."
     )
-    path_in_repo: str = Field(
-        default="Results_final.zip",
-        description="Destination file path inside the Hugging Face repository."
+    path_in_repo: Optional[str] = Field(
+        default=None,
+        description="Destination file path inside the Hugging Face repository. If None or null, automatically uses dynamic timestamped artifact filename."
     )
     create_repo: bool = Field(
         default=True,

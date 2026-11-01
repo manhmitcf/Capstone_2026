@@ -404,14 +404,17 @@ def upload_artifact_if_enabled(upload_config: ArtifactUploadConfig, config: Trai
         except Exception as exc:
             logger.debug(f"Branch verification note: {exc}")
 
+    target_path_in_repo = getattr(upload_config, "path_in_repo", None) or artifact_filename
+
     logger.info("==================================================")
     logger.info(f"Uploading artifact to Hugging Face repo: '{upload_config.repo_id}'")
+    logger.info(f"Target file in repo:                  '{target_path_in_repo}'")
+    logger.info(f"Local source zip:                     '{artifact_zip}'")
     logger.info(f"Repo type:                            '{upload_config.repo_type}'")
     logger.info(f"Branch:                               '{target_branch}'")
     logger.info("==================================================")
 
     try:
-        target_path_in_repo = getattr(upload_config, "path_in_repo", None) or artifact_filename
         upload_file(
             path_or_fileobj=artifact_zip,
             path_in_repo=target_path_in_repo,
