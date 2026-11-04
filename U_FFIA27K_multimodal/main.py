@@ -270,7 +270,18 @@ def build_artifact_filename(config: TrainConfig, timestamp: str, suffix: str = "
     split_strategy = config.dataset_splitter.split_strategy
     eval_mode = config.dataset_splitter.evaluation_mode
     safe_suffix = suffix if suffix.startswith(".") else f".{suffix}"
-    return f"{model_name}_{dataset_name}_{split_strategy}_{eval_mode}_{timestamp}{safe_suffix}"
+
+    if eval_mode == "cross_validation":
+        fold_idx = getattr(config.dataset_splitter, "fold_index", None)
+        if fold_idx is not None:
+            mode_tag = f"cv_fold{fold_idx}"
+        else:
+            num_f = getattr(config.dataset_splitter, "num_folds", 5)
+            mode_tag = f"cv_{num_f}folds"
+    else:
+        mode_tag = eval_mode
+
+    return f"{model_name}_{dataset_name}_{split_strategy}_{mode_tag}_{timestamp}{safe_suffix}"
 
 
 def zip_directory(source_dir: str, output_path: str) -> str:
