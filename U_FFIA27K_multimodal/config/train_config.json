@@ -37,7 +37,7 @@
     ],
     "video_drop_path": 0.1,
     "tie_breakers": {
-      "enable_b12": false,
+      "enable_b12": true,
       "enable_b23": true,
       "enable_b13": false
     },
