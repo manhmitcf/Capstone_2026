@@ -22,10 +22,10 @@
   },
   "loss": {
     "loss_type": "pairwise_tournament",
-    "weight_act": 0.0,
-    "weight_pairwise": 0.0,
+    "weight_act": 0.5,
+    "weight_pairwise": 0.5,
     "weight_ce": 1.0,
-    "aux_loss_weight": 0.0
+    "aux_loss_weight": 0.3
   },
   "model": {
     "backbone": "MultimodalSOTANet",
@@ -44,7 +44,7 @@
     "tournament": {
       "tie_temperature": 1.0,
       "voting_temperature": 1.0,
-      "head_hidden_dims": []
+      "head_hidden_dims": [256]
     }
   },
   "video_features": {
